@@ -260,12 +260,38 @@ def _check_name_metadata(font: TTFont) -> CheckResult:
 
 # ---------- public API ----------
 
+def _check_rendering(font_path: Path, ref_font: Path | None,
+                     texts: list[str], tolerance_pct: float) -> CheckResult | None:
+    if ref_font is None:
+        return None
+    from .render import compare_rendering
+    cmp = compare_rendering(font_path, ref_font, texts,
+                            tolerance_pct=tolerance_pct, normalize_upm=True)
+    failed = [ln for ln in cmp.lines if not ln["passed"]]
+    if failed:
+        return CheckResult(
+            "rendering_match", False,
+            f"{len(failed)}/{len(cmp.lines)} sample lines exceed "
+            f"±{tolerance_pct}% width tolerance",
+            {"tolerancePct": tolerance_pct,
+             "failingLines": [{"text": ln["text"][:60],
+                                "deltaPct": ln["deltaPct"]} for ln in failed]},
+        )
+    return CheckResult("rendering_match", True,
+                       f"all {len(cmp.lines)} sample lines within "
+                       f"±{tolerance_pct}%",
+                       {"tolerancePct": tolerance_pct,
+                        "lines": len(cmp.lines)})
+
+
 def validate_font(font_path: str | Path, against: str | Path,
                   *, tolerance: int = 0,
                   strict_global: bool = False,
                   include_lsb: bool = True,
                   include_kerning: bool = True,
-                  include_vertical: bool = True) -> ValidationReport:
+                  include_vertical: bool = True,
+                  render_texts: list[str] | None = None,
+                  render_tolerance_pct: float = 1.0) -> ValidationReport:
     """Run all checks. Returns a :class:`ValidationReport`."""
     font_path = Path(font_path)
     against = Path(against)
@@ -304,6 +330,14 @@ def validate_font(font_path: str | Path, against: str | Path,
         if opt is not None:
             report.checks.append(opt)
     report.checks.append(_check_name_metadata(font))
+
+    # Rendering regression — only if --against is a font file and
+    # render_texts is provided.
+    if render_texts and Path(against).suffix.lower() in (".ttf", ".otf"):
+        rcheck = _check_rendering(font_path, Path(against),
+                                  render_texts, render_tolerance_pct)
+        if rcheck is not None:
+            report.checks.append(rcheck)
 
     font.close()
     return report
@@ -348,14 +382,33 @@ def format_json(report: ValidationReport, *, indent: int = 2) -> str:
               help="Also check outline-derived global fields (head.xMin/xMax, "
                    "hhea.advanceWidthMax, ...). These reflect the design "
                    "font's outlines, so a mismatch is expected with MCFG.")
+@click.option("--render-test", "render_test", default=None,
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Sample text file for HarfBuzz line-width regression. "
+                   "Requires --against to be a font file.")
+@click.option("--render-default", is_flag=True,
+              help="Use built-in Hangul/Latin sample texts for the "
+                   "rendering regression test.")
+@click.option("--render-tolerance-pct", type=float, default=1.0,
+              show_default=True,
+              help="Allowed |delta| % per line.")
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]),
               default="text", show_default=True)
 @click.option("-o", "--output", type=click.Path(dir_okay=False, path_type=Path),
               default=None)
 def validate_cmd(font: Path, against_path: Path, tolerance: int,
-                 strict_global: bool, fmt: str, output: Path | None) -> None:
+                 strict_global: bool, render_test: Path | None,
+                 render_default: bool,
+                 render_tolerance_pct: float,
+                 fmt: str, output: Path | None) -> None:
+    render_texts = None
+    if render_test is not None or render_default:
+        from .render import load_render_texts
+        render_texts = load_render_texts(render_test)
     report = validate_font(font, against_path, tolerance=tolerance,
-                           strict_global=strict_global)
+                           strict_global=strict_global,
+                           render_texts=render_texts,
+                           render_tolerance_pct=render_tolerance_pct)
     text = format_json(report) if fmt == "json" else format_text(report)
     if output is None:
         click.echo(text, nl=False)

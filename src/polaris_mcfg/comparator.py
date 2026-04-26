@@ -437,7 +437,7 @@ def format_text(diff: MetricsDiff, *, max_glyph_rows: int = 20) -> str:
 @click.command(help="Compare two fonts (or two metric JSONs).")
 @click.argument("a", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.argument("b", type=click.Path(exists=True, dir_okay=False, path_type=Path))
-@click.option("--format", "fmt", type=click.Choice(["text", "json"]),
+@click.option("--format", "fmt", type=click.Choice(["text", "json", "html"]),
               default="text", show_default=True)
 @click.option("-o", "--output", type=click.Path(dir_okay=False, path_type=Path),
               default=None, help="Output path (default: stdout).")
@@ -448,21 +448,44 @@ def format_text(diff: MetricsDiff, *, max_glyph_rows: int = 20) -> str:
               help="Scale advance widths to a common upm before comparing.")
 @click.option("--max-rows", type=int, default=20, show_default=True,
               help="(text format) max differing glyphs to list.")
+@click.option("--render-test", "render_test", default=None,
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Sample text file for HarfBuzz line-width comparison "
+                   "(requires both inputs to be font files).")
+@click.option("--render-tolerance-pct", type=float, default=1.0,
+              show_default=True,
+              help="Allowed |delta| % per line for the rendering test.")
 def compare_cmd(a: Path, b: Path, fmt: str, output: Path | None,
-                threshold: int, normalize_upm: bool, max_rows: int) -> None:
+                threshold: int, normalize_upm: bool, max_rows: int,
+                render_test: Path | None,
+                render_tolerance_pct: float) -> None:
     spec_a = load_spec(a)
     spec_b = load_spec(b)
     diff = diff_specs(spec_a, spec_b, threshold=threshold,
                       normalize_upm=normalize_upm)
 
+    render_cmp = None
+    if render_test is not None or fmt == "html":
+        # Rendering test requires actual font files.
+        if a.suffix.lower() in (".ttf", ".otf") and b.suffix.lower() in (".ttf", ".otf"):
+            from .render import compare_rendering, load_render_texts
+            texts = load_render_texts(render_test)
+            render_cmp = compare_rendering(a, b, texts,
+                                           tolerance_pct=render_tolerance_pct,
+                                           normalize_upm=normalize_upm)
+
     if fmt == "json":
-        text = format_json(diff)
+        out_text = format_json(diff)
+    elif fmt == "html":
+        from .report import format_html
+        out_text = format_html(diff, render_comparison=render_cmp,
+                               top_n=max_rows)
     else:
-        text = format_text(diff, max_glyph_rows=max_rows)
+        out_text = format_text(diff, max_glyph_rows=max_rows)
 
     if output is None:
-        click.echo(text, nl=False)
+        click.echo(out_text, nl=False)
     else:
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(text, encoding="utf-8")
+        output.write_text(out_text, encoding="utf-8")
         click.echo(f"wrote {output}", err=True)
