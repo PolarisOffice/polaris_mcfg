@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polaris-mcfg"
+version = "0.1.0"
+description = "Metric-Compatible Font Generator: extract layout metrics from a source font and apply them to a freely-licensed font's glyph design."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Miles Haeseok Lee" }]
+keywords = ["font", "fontTools", "metrics", "ttf", "otf", "hangul"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics :: Editors :: Vector-Based",
+    "Topic :: Text Processing :: Fonts",
+]
+dependencies = [
+    "fonttools>=4.50",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+render = ["uharfbuzz>=0.39"]
+dev = ["pytest>=7", "uharfbuzz>=0.39"]
+
+[project.scripts]
+mcfg = "polaris_mcfg.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
