@@ -40,6 +40,7 @@ Thumbs.db
 # Generated test fonts (kept out of vcs)
 tests/_tmp/
 samples/_tmp/
+samples/out/
 
 # Locally downloaded font assets (Noto Sans KR etc.) — too large for git
 # Samples reference fonts/ via paths the user provides locally.

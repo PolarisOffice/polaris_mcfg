@@ -36,6 +36,8 @@ mcfg = "polaris_mcfg.cli:main"
 
 [project.urls]
 Repository = "https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg"
+Issues = "https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg/issues"
+Changelog = "https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
