@@ -53,7 +53,9 @@ def make_test_font(
     if glyph_widths is None:
         glyph_widths = {".notdef": 500, "A": 600, "B": 650, "space": 250}
     if cmap is None:
-        cmap = {0x0041: "A", 0x0042: "B", 0x0020: "space"}
+        # Default cmap, but drop entries whose glyph isn't present.
+        full = {0x0041: "A", 0x0042: "B", 0x0020: "space"}
+        cmap = {cp: gn for cp, gn in full.items() if gn in glyph_widths}
 
     glyph_order = list(glyph_widths.keys())
     if ".notdef" not in glyph_order:
