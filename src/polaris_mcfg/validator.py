@@ -176,6 +176,71 @@ def _check_glyph_coverage(actual: MetricsSpec, ref: MetricsSpec) -> CheckResult:
                        f"font covers all {len(ref.glyphs)} reference glyphs")
 
 
+def _check_lsb(actual: MetricsSpec, ref: MetricsSpec,
+               tolerance: int) -> CheckResult | None:
+    """Compare LSB only when *both* specs include it."""
+    pairs = [(k, actual.glyphs[k].lsb, ref.glyphs[k].lsb)
+             for k in set(actual.glyphs) & set(ref.glyphs)
+             if actual.glyphs[k].lsb is not None
+             and ref.glyphs[k].lsb is not None]
+    if not pairs:
+        return None
+    bad = [(g, a, r) for g, a, r in pairs if abs(a - r) > tolerance]
+    if bad:
+        return CheckResult(
+            "lsb_match", False,
+            f"{len(bad)}/{len(pairs)} LSBs differ (tolerance {tolerance}u)",
+            {"common": len(pairs), "differingCount": len(bad),
+             "topDiffs": [{"id": g, "actual": a, "ref": r}
+                          for g, a, r in sorted(bad, key=lambda x: -abs(x[1] - x[2]))[:10]]},
+        )
+    return CheckResult("lsb_match", True,
+                       f"all {len(pairs)} LSBs match within tolerance",
+                       {"common": len(pairs)})
+
+
+def _check_kerning(actual: MetricsSpec, ref: MetricsSpec) -> CheckResult | None:
+    if actual.kerning is None or ref.kerning is None:
+        return None
+    a = {(p.left, p.right): p.value for p in actual.kerning}
+    r = {(p.left, p.right): p.value for p in ref.kerning}
+    common = set(a) & set(r)
+    only_in_ref = sorted(set(r) - set(a))
+    differ = [k for k in common if a[k] != r[k]]
+    if differ or only_in_ref:
+        return CheckResult(
+            "kerning_match", False,
+            f"{len(differ)} pair(s) differ, "
+            f"{len(only_in_ref)} reference pair(s) missing from font",
+            {"differingCount": len(differ),
+             "missingFromFont": only_in_ref[:20]},
+        )
+    return CheckResult("kerning_match", True,
+                       f"all {len(common)} reference kerning pairs present and matching",
+                       {"common": len(common)})
+
+
+def _check_vertical(actual: MetricsSpec, ref: MetricsSpec,
+                    tolerance: int) -> CheckResult | None:
+    if actual.vertical is None or ref.vertical is None:
+        return None
+    a_vmtx = actual.vertical.vmtx
+    r_vmtx = ref.vertical.vmtx
+    common = set(a_vmtx) & set(r_vmtx)
+    bad = [k for k in common
+           if abs(a_vmtx[k].advanceHeight - r_vmtx[k].advanceHeight) > tolerance]
+    if bad:
+        return CheckResult(
+            "vertical_match", False,
+            f"{len(bad)}/{len(common)} vertical advances differ "
+            f"(tolerance {tolerance}u)",
+            {"common": len(common), "differingCount": len(bad)},
+        )
+    return CheckResult("vertical_match", True,
+                       f"all {len(common)} vertical advances match",
+                       {"common": len(common)})
+
+
 def _check_name_metadata(font: TTFont) -> CheckResult:
     """Sanity-check the name table for required IDs."""
     name = font["name"]
@@ -231,6 +296,13 @@ def validate_font(font_path: str | Path, against: str | Path,
                                                 strict=strict_global))
     report.checks.append(_check_advance_widths(actual, ref, tolerance))
     report.checks.append(_check_glyph_coverage(actual, ref))
+    for opt in (
+        _check_lsb(actual, ref, tolerance),
+        _check_kerning(actual, ref),
+        _check_vertical(actual, ref, tolerance),
+    ):
+        if opt is not None:
+            report.checks.append(opt)
     report.checks.append(_check_name_metadata(font))
 
     font.close()

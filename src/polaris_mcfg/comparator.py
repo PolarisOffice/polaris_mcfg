@@ -102,6 +102,27 @@ class KerningDiff:
 
 
 @dataclass
+class VerticalDiff:
+    """Per-glyph vertical advance / TSB comparison."""
+    vhea: dict[str, list[Any]] = field(default_factory=dict)
+    """``{field: [a_value, b_value]}`` for vhea fields that differ."""
+    advance: dict[str, list[int]] = field(default_factory=dict)
+    """``{glyph_id: [a_advanceHeight, b_advanceHeight, delta]}``"""
+    only_in_a: list[str] = field(default_factory=list)
+    only_in_b: list[str] = field(default_factory=list)
+    stats: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "vhea": self.vhea,
+            "advance": self.advance,
+            "onlyInA": self.only_in_a,
+            "onlyInB": self.only_in_b,
+            "stats": self.stats,
+        }
+
+
+@dataclass
 class MetricsDiff:
     a_source: dict[str, Any] = field(default_factory=dict)
     b_source: dict[str, Any] = field(default_factory=dict)
@@ -111,6 +132,7 @@ class MetricsDiff:
     advance_diff: AdvanceDiff = field(default_factory=AdvanceDiff)
     lsb_diff: AdvanceDiff | None = None
     kerning_diff: KerningDiff | None = None
+    vertical_diff: VerticalDiff | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -125,6 +147,8 @@ class MetricsDiff:
             d["lsb"] = self.lsb_diff.to_dict()
         if self.kerning_diff is not None:
             d["kerning"] = self.kerning_diff.to_dict()
+        if self.vertical_diff is not None:
+            d["vertical"] = self.vertical_diff.to_dict()
         return d
 
 
@@ -253,6 +277,39 @@ def _kerning_diff(a_pairs, b_pairs) -> KerningDiff | None:
     return diff
 
 
+def _vertical_diff(a, b, *, threshold: int) -> VerticalDiff | None:
+    if a is None and b is None:
+        return None
+    a_vhea = a.vhea if a is not None else {}
+    b_vhea = b.vhea if b is not None else {}
+    a_vmtx = a.vmtx if a is not None else {}
+    b_vmtx = b.vmtx if b is not None else {}
+    diff = VerticalDiff(
+        vhea=_diff_dict(a_vhea, b_vhea),
+        only_in_a=sorted(set(a_vmtx) - set(b_vmtx)),
+        only_in_b=sorted(set(b_vmtx) - set(a_vmtx)),
+    )
+    common = sorted(set(a_vmtx) & set(b_vmtx))
+    deltas: list[int] = []
+    matching = 0
+    for k in common:
+        av = a_vmtx[k].advanceHeight
+        bv = b_vmtx[k].advanceHeight
+        delta = bv - av
+        if abs(delta) <= threshold:
+            matching += 1
+            continue
+        diff.advance[k] = [av, bv, delta]
+        deltas.append(delta)
+    diff.stats = {
+        "commonCount": len(common),
+        "matchingCount": matching,
+        "differingCount": len(common) - matching,
+        "deltas": _stats(deltas),
+    }
+    return diff
+
+
 def diff_specs(a: MetricsSpec, b: MetricsSpec, *,
                threshold: int = 0,
                normalize_upm: bool = False) -> MetricsDiff:
@@ -272,6 +329,7 @@ def diff_specs(a: MetricsSpec, b: MetricsSpec, *,
     )
     lsb = _lsb_diff(a.glyphs, b.glyphs, threshold=threshold)
     kern = _kerning_diff(a.kerning, b.kerning)
+    vert = _vertical_diff(a.vertical, b.vertical, threshold=threshold)
 
     return MetricsDiff(
         a_source=a.source, b_source=b.source,
@@ -281,6 +339,7 @@ def diff_specs(a: MetricsSpec, b: MetricsSpec, *,
         advance_diff=adv,
         lsb_diff=lsb,
         kerning_diff=kern,
+        vertical_diff=vert,
     )
 
 
@@ -352,6 +411,22 @@ def format_text(diff: MetricsDiff, *, max_glyph_rows: int = 20) -> str:
         lines.append(f"  differing pairs: {len(kd.common)}    "
                      f"only in A: {len(kd.only_in_a)}    "
                      f"only in B: {len(kd.only_in_b)}")
+        lines.append("")
+
+    # Vertical
+    if diff.vertical_diff is not None:
+        vd = diff.vertical_diff
+        s = vd.stats
+        lines.append("## Vertical metrics")
+        if vd.vhea:
+            lines.append("  [vhea]")
+            for k, (av, bv) in vd.vhea.items():
+                lines.append(f"    {k:<22} A={av!r:<14} B={bv!r}")
+        lines.append(f"  vmtx common: {s.get('commonCount', 0)}    "
+                     f"matching: {s.get('matchingCount', 0)}    "
+                     f"differing: {s.get('differingCount', 0)}")
+        lines.append(f"  only in A: {len(vd.only_in_a)}    "
+                     f"only in B: {len(vd.only_in_b)}")
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"

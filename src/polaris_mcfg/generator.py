@@ -183,11 +183,28 @@ def _apply_vertical(font: TTFont, metrics: MetricsSpec,
     dst_upm = font["head"].unitsPerEm
 
     if "vhea" not in font:
-        # Most design fonts have no vertical tables. Synthesize minimal ones.
+        # Most design fonts have no vertical tables. Synthesize a complete
+        # vhea (sstruct.pack requires every field, even unused ones) and an
+        # empty vmtx to be filled below.
         from fontTools.ttLib.tables._v_h_e_a import table__v_h_e_a
         from fontTools.ttLib.tables._v_m_t_x import table__v_m_t_x
-        font["vhea"] = table__v_h_e_a()
-        font["vhea"].tableVersion = 0x00011000
+        vhea_tbl = table__v_h_e_a()
+        vhea_tbl.tableVersion = 0x00011000
+        vhea_tbl.ascent = 0
+        vhea_tbl.descent = 0
+        vhea_tbl.lineGap = 0
+        vhea_tbl.advanceHeightMax = 0
+        vhea_tbl.minTopSideBearing = 0
+        vhea_tbl.minBottomSideBearing = 0
+        vhea_tbl.yMaxExtent = 0
+        vhea_tbl.caretSlopeRise = 1
+        vhea_tbl.caretSlopeRun = 0
+        vhea_tbl.caretOffset = 0
+        vhea_tbl.reserved0 = vhea_tbl.reserved1 = 0
+        vhea_tbl.reserved2 = vhea_tbl.reserved3 = vhea_tbl.reserved4 = 0
+        vhea_tbl.metricDataFormat = 0
+        vhea_tbl.numberOfVMetrics = 0
+        font["vhea"] = vhea_tbl
         font["vmtx"] = table__v_m_t_x()
         font["vmtx"].metrics = {}
     vhea = font["vhea"]
