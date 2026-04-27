@@ -7,6 +7,13 @@
       "runtimeArgs": ["-m", "http.server", "8765"],
       "cwd": "samples/visual_test/out",
       "port": 8765
+    },
+    {
+      "name": "pages-demo",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8766"],
+      "cwd": "docs/demo",
+      "port": 8766
     }
   ]
 }

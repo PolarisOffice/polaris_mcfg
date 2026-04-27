@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polaris MCFG — Metric-Compatible Font Generator</title>
+<style>
+  body { font: 14px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         color: #222; max-width: 720px; margin: 32px auto; padding: 0 20px; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  h2 { font-size: 16px; margin: 28px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #ddd; }
+  .lead { color: #555; font-size: 15px; }
+  code { font: 12px Menlo, Monaco, monospace; background: #f3f3f3; padding: 1px 5px; border-radius: 3px; }
+  a.cta { display: inline-block; background: #2c4ec9; color: white; padding: 10px 18px;
+          text-decoration: none; border-radius: 6px; font-weight: 600; }
+  a.cta:hover { background: #1f3a99; }
+  .muted { color: #888; font-size: 13px; }
+  pre { background: #f8f8f8; border: 1px solid #eaeaea; padding: 10px 12px;
+        border-radius: 4px; font: 12px Menlo, Monaco, monospace; overflow-x: auto; }
+  ul { padding-left: 22px; }
+</style>
+</head>
+<body>
+
+<h1>Polaris MCFG</h1>
+<p class="lead">
+  <strong>Metric-Compatible Font Generator</strong> &mdash;
+  한컴 폰트와 같이 라이센스가 제한된 폰트의 <em>레이아웃 메트릭</em>(advance width,
+  ascender/descender, line gap)을 추출하여 자유 라이센스 폰트의 <em>글리프 디자인</em>에
+  결합한 새로운 폰트를 생성합니다. 원본 문서의 줄바꿈/페이지 분할은 유지하면서
+  라이센스 안전성을 확보합니다.
+</p>
+
+<p style="margin: 22px 0;">
+  <a class="cta" href="demo/">→ Live demo 열기</a>
+  &nbsp;
+  <a href="https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg" style="color: #555;">GitHub →</a>
+</p>
+
+<h2>데모가 보여주는 것</h2>
+<ul>
+  <li>NotoSansKR &amp; Pretendard (각각 OFL) 두 폰트로 메트릭 교차 합성한 4개 폰트.</li>
+  <li>같은 메트릭 그룹의 두 폰트는 외형이 달라도 <strong>동일 위치에서 줄바꿈</strong>해야 한다는
+    가설을 시각적으로 검증.</li>
+  <li>Korean(<code>lang="ko"</code>)/English(<code>lang="en"</code>) 양쪽에서 byte-perfect
+    매칭 (Group A 16/16, Group B 15/15).</li>
+</ul>
+
+<h2>기술적 핵심</h2>
+<ul>
+  <li><strong>메트릭만 추출, 외형 데이터 미접근</strong> &mdash; 추출기는 <code>head/hhea/OS/2/post/hmtx</code> 등
+    뉴머릭 테이블만 읽고 <code>glyf/CFF</code>는 절대 건드리지 않음 (테스트로 강제).</li>
+  <li><strong>UPM 정합 + GPOS 커닝 + GSUB locl 이식</strong>으로 브라우저 렌더링 단위까지 일치.</li>
+  <li><strong>opt-in GSUB 처리</strong> &mdash; 라이센스 보수적 사용자는 <code>--apply gsub</code> 미사용.</li>
+</ul>
+
+<h2>로컬에서 사용</h2>
+<pre>git clone https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg
+cd polaris_mcfg
+python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+pip install -e '.[dev]'
+
+mcfg extract source.ttf -o source.metrics.json
+mcfg generate \
+  --metrics source.metrics.json \
+  --design  free-license-font.ttf \
+  --apply   global,advance,kerning,gsub \
+  --match-upm \
+  --output  out.ttf</pre>
+
+<h2>라이센스</h2>
+<p class="muted">
+  본 도구의 코드: <a href="https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg/blob/main/LICENSE">MIT</a>.
+  데모 폰트(Polaris NPM / Polaris PNM)는 NotoSansKR / Pretendard의 파생물이므로
+  <a href="https://scripts.sil.org/OFL">SIL Open Font License 1.1</a> 하에 배포되며,
+  family name을 변경하여 OFL Reserved Font Name 정책을 준수합니다.
+</p>
+
+</body>
+</html>

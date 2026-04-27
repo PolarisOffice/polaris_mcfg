@@ -453,11 +453,18 @@ def _apply_shaped_advances(
 
 
 def _strip_locl_feature(font: TTFont) -> int:
-    """Remove the design font's ``locl`` feature and any lookups exclusively
-    referenced by it. Returns the number of lookups removed.
+    """Remove the design font's ``locl`` feature records and unhook them
+    from every script's LangSys.
 
-    Other features (mark, liga, calt, ...) are preserved. We don't touch
-    GSUB if the font has no GSUB table at all.
+    We deliberately do NOT delete the underlying GSUB lookups — contextual
+    and chaining lookups (type 5/6) reference other lookups by index inside
+    their SubstLookupRecords, and tracking those indirections to safely
+    drop dead lookups is fragile. Leaving the lookups in place is a small
+    file-size cost; with the ``locl`` feature gone, browsers won't auto-
+    activate them based on the page ``lang`` attribute, which is what
+    matters for layout reproducibility.
+
+    Returns the number of ``locl`` feature records removed.
     """
     if "GSUB" not in font:
         return 0
@@ -465,46 +472,27 @@ def _strip_locl_feature(font: TTFont) -> int:
     if not gsub or not gsub.FeatureList:
         return 0
 
-    # Identify all lookup indices used by `locl` and by every other feature
-    # so we can drop lookups that are *only* used by locl.
-    locl_indices: set[int] = set()
-    other_indices: set[int] = set()
-    for fr in gsub.FeatureList.FeatureRecord:
-        idxs = set(fr.Feature.LookupListIndex)
-        if fr.FeatureTag == "locl":
-            locl_indices |= idxs
-        else:
-            other_indices |= idxs
-    droppable = locl_indices - other_indices
-    if not droppable:
+    # Find indices of locl feature records.
+    locl_feat_indices = {
+        i for i, fr in enumerate(gsub.FeatureList.FeatureRecord)
+        if fr.FeatureTag == "locl"
+    }
+    if not locl_feat_indices:
         return 0
 
-    # Renumber surviving lookups; drop the locl-only ones.
-    new_lookups: list = []
-    old_to_new: dict[int, int] = {}
-    for old_idx, lk in enumerate(gsub.LookupList.Lookup):
-        if old_idx in droppable:
-            continue
-        old_to_new[old_idx] = len(new_lookups)
-        new_lookups.append(lk)
-    gsub.LookupList.Lookup = new_lookups
-    gsub.LookupList.LookupCount = len(new_lookups)
-
-    # Remap remaining feature lookup indices and drop the `locl` feature
-    # records entirely; ScriptList's FeatureIndex lists need parallel updating.
-    surviving_features: list = []
+    # Drop the locl feature records and remap remaining feature indices.
+    surviving: list = []
     feat_idx_remap: dict[int, int] = {}
-    for old_fi, fr in enumerate(gsub.FeatureList.FeatureRecord):
-        if fr.FeatureTag == "locl":
+    for old_idx, fr in enumerate(gsub.FeatureList.FeatureRecord):
+        if old_idx in locl_feat_indices:
             continue
-        fr.Feature.LookupListIndex = [old_to_new[i] for i in fr.Feature.LookupListIndex
-                                       if i in old_to_new]
-        fr.Feature.LookupCount = len(fr.Feature.LookupListIndex)
-        feat_idx_remap[old_fi] = len(surviving_features)
-        surviving_features.append(fr)
-    gsub.FeatureList.FeatureRecord = surviving_features
-    gsub.FeatureList.FeatureCount = len(surviving_features)
+        feat_idx_remap[old_idx] = len(surviving)
+        surviving.append(fr)
+    gsub.FeatureList.FeatureRecord = surviving
+    gsub.FeatureList.FeatureCount = len(surviving)
 
+    # Update every LangSys's FeatureIndex list to drop locl refs and remap
+    # surviving ones.
     for sr in gsub.ScriptList.ScriptRecord:
         for ls in [sr.Script.DefaultLangSys] + [
             lsr.LangSys for lsr in sr.Script.LangSysRecord
@@ -515,7 +503,7 @@ def _strip_locl_feature(font: TTFont) -> int:
                                 if i in feat_idx_remap]
             ls.FeatureCount = len(ls.FeatureIndex)
 
-    return len(droppable)
+    return len(locl_feat_indices)
 
 
 # Backward compat for the type signature change in the inline dict above.

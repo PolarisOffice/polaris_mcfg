@@ -2,6 +2,34 @@
 
 All notable changes to Polaris MCFG.
 
+## [0.2.1] — 2026-04-27 — GitHub Pages demo + locl strip refinement
+
+### Added
+- **`docs/demo/`** — self-contained GitHub Pages demo. 4 fonts subsetted to
+  the demo text + common Korean/Latin punctuation, all WOFF2-compressed.
+  Total page weight ~175 KB. OFL.txt files for both source families
+  bundled alongside.
+- **`docs/index.html`** — landing page with project intro + demo CTA.
+- **`docs/demo/build.py`** — build script for the demo (subsetting +
+  WOFF2 packaging on top of `samples/visual_test/build.py`'s pipeline).
+
+### Fixed
+- `_strip_locl_feature` no longer drops GSUB lookups, only the `locl`
+  feature records and their LangSys references. Contextual / chaining
+  lookups (type 5/6) reference other lookups by index inside their
+  SubstLookupRecord, so removing locl-exclusive lookups left dangling
+  references that broke `fontTools.subset.Subsetter`. Leaving the
+  underlying lookups in place is a small file-size cost; with the locl
+  feature gone, browsers no longer auto-activate them under `lang`.
+
+### License
+- Polaris NPM / Polaris PNM are derivative works under
+  [SIL OFL 1.1](https://scripts.sil.org/OFL). Family names changed per
+  the Reserved Font Name policy. Bundled OFL.txt provides the original
+  copyrights for NotoSansKR (Adobe / Google) and Pretendard.
+
+---
+
 ## [0.2.0] — 2026-04-27 — byte-perfect line-break match
 
 Group A (Noto + Polaris PNM) and Group B (Pretendard + Polaris NPM) line

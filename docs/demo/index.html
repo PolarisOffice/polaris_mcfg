@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polaris MCFG — Live demo</title>
+<style>
+:root {
+  /* group A — Noto metrics: original Noto + Polaris (Pretendard outline + Noto metrics) */
+  --metric-a:        #2c4ec9;
+  --metric-a-soft:   #e8edfa;
+  /* group B — Pretendard metrics: original Pretendard + Polaris (Noto outline + Pretendard metrics) */
+  --metric-b:        #c0392b;
+  --metric-b-soft:   #fbeae8;
+
+  --bg: #fafafa;
+  --fg: #222;
+  --muted: #888;
+  --border: #ddd;
+}
+
+@font-face {
+  font-family: 'OrigNoto';
+  src: url('fonts/00-NotoSansKR-Regular.woff2?cb=1777254847') format('woff2');
+  font-display: block;
+}
+@font-face {
+  font-family: 'OrigPretendard';
+  src: url('fonts/01-Pretendard-Regular.woff2?cb=1777254847') format('woff2');
+  font-display: block;
+}
+@font-face {
+  font-family: 'PolarisNPM';
+  src: url('fonts/02-Polaris-NPM-Regular.woff2?cb=1777254847') format('woff2');
+  font-display: block;
+}
+@font-face {
+  font-family: 'PolarisPNM';
+  src: url('fonts/03-Polaris-PNM-Regular.woff2?cb=1777254847') format('woff2');
+  font-display: block;
+}
+
+/* The four font classes are tagged by which METRICS they carry, since that
+   is what determines layout. Color groups visualize the pairing. */
+.f-noto       { font-family: 'OrigNoto', sans-serif;       border-left-color: var(--metric-a); }
+.f-pnm        { font-family: 'PolarisPNM', sans-serif;     border-left-color: var(--metric-a); }
+.f-pretendard { font-family: 'OrigPretendard', sans-serif; border-left-color: var(--metric-b); }
+.f-npm        { font-family: 'PolarisNPM', sans-serif;     border-left-color: var(--metric-b); }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+body {
+  font: 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 16px; margin: 36px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+h3 { font-size: 12px; margin: 12px 0 6px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+p  { margin: 6px 0; line-height: 1.5; }
+.muted { color: var(--muted); }
+.lead { font-size: 14px; }
+.hypothesis { background: #fffbe6; padding: 8px 12px; border-left: 3px solid #f5b400; }
+code { font: 12px Menlo, Monaco, monospace; background: #f0f0f0; padding: 1px 5px; border-radius: 3px; }
+
+.legend { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.legend-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-left-width: 4px; background: #fff; }
+.legend-item .swatch { width: 10px; height: 10px; border-radius: 50%; }
+.legend-item .name { font-weight: 600; }
+.legend-item .desc { color: var(--muted); font-size: 12px; }
+.metric-a-bg { background: var(--metric-a-soft); }
+.metric-b-bg { background: var(--metric-b-soft); }
+
+/* sample blocks all get a colored left border indicating their METRICS group */
+.sample {
+  border-left: 4px solid #ccc;
+  padding: 6px 12px;
+  background: #fff;
+  margin: 4px 0;
+}
+.sample .label {
+  display: inline-block;
+  font: 11px Menlo, Monaco, monospace;
+  color: var(--muted);
+  margin-right: 8px;
+  min-width: 220px;
+}
+
+/* line-break test: two columns side-by-side, fixed width */
+.linebreak-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 8px;
+}
+.linebreak-grid .col {
+  border: 1px solid var(--border);
+  border-top: 4px solid;
+  padding: 12px;
+  background: #fff;
+}
+.linebreak-grid .col h3 { margin-top: 0; color: inherit; }
+.linebreak-grid .col p {
+  font-size: 15px;
+  /* The fixed-width container is what makes the wrap test meaningful. */
+  max-width: 26em;
+  margin: 8px 0 0;
+}
+.metric-a .col { border-top-color: var(--metric-a); }
+.metric-a h3 { color: var(--metric-a); }
+.metric-b .col { border-top-color: var(--metric-b); }
+.metric-b h3 { color: var(--metric-b); }
+.note { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+/* size ladder */
+.size-ladder { background: #fff; border: 1px solid var(--border); padding: 12px; }
+.size-ladder p { margin: 4px 0; }
+.size-ladder .row { display: grid; grid-template-columns: 60px 1fr 1fr 1fr 1fr; gap: 12px; align-items: center; padding: 4px 0; border-bottom: 1px solid #f0f0f0; }
+.size-ladder .row:last-child { border-bottom: 0; }
+.size-ladder .px { color: var(--muted); font: 11px Menlo, monospace; }
+
+/* 4-column paragraph */
+.four-col { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; }
+.four-col .col { border-top: 4px solid; padding: 10px; background: #fff; }
+.four-col .col h3 { margin-top: 0; color: inherit; }
+.four-col .col p { font-size: 13px; }
+
+/* tabular numbers */
+table.numbers { width: 100%; border-collapse: collapse; font-size: 14px; background: #fff; }
+table.numbers th, table.numbers td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: right; }
+table.numbers th { background: #f5f5f5; }
+table.numbers td:first-child, table.numbers th:first-child { text-align: left; }
+
+/* glyph showcase */
+.glyph-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.glyph-grid .cell { border-top: 4px solid; padding: 14px; background: #fff; text-align: center; }
+.glyph-grid .cell .big { font-size: 56px; line-height: 1; margin: 8px 0; }
+.glyph-grid .cell .small { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header style="border-bottom: 1px solid #ddd; padding-bottom: 12px; margin-bottom: 24px;">
+  <p style="margin: 0; font-size: 12px; color: #888;">
+    <a href="../" style="color: inherit;">&larr; polaris_mcfg</a> &middot;
+    <a href="https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg" style="color: inherit;">GitHub</a>
+  </p>
+  <h1 style="margin: 6px 0 4px; font-size: 22px;">Polaris MCFG &mdash; Live demo</h1>
+  <p style="margin: 0; color: #555; font-size: 14px;">
+    NotoSansKR &amp; Pretendard 두 OFL 폰트로 메트릭 교차 합성한 결과.
+    같은 메트릭 그룹의 두 폰트는 외형이 달라도 동일 위치에서 줄바꿈해야 합니다.
+    폰트 파일은 데모 텍스트에 맞춰 subset 후 WOFF2로 압축됨 (~50 KB/font).
+  </p>
+</header>
+
+
+<div class="legend">
+  <div class="legend-item metric-a-bg" style="border-left-color: var(--metric-a);">
+    <span class="swatch" style="background: var(--metric-a);"></span>
+    <div>
+      <div class="name f-noto">NotoSansKR Regular (원본)</div>
+      <div class="desc">Noto outline + Noto metrics</div>
+    </div>
+  </div>
+  <div class="legend-item metric-a-bg" style="border-left-color: var(--metric-a);">
+    <span class="swatch" style="background: var(--metric-a);"></span>
+    <div>
+      <div class="name f-pnm">Polaris PNM (합성)</div>
+      <div class="desc">Pretendard outline + <strong>Noto metrics</strong></div>
+    </div>
+  </div>
+  <div class="legend-item metric-b-bg" style="border-left-color: var(--metric-b);">
+    <span class="swatch" style="background: var(--metric-b);"></span>
+    <div>
+      <div class="name f-pretendard">Pretendard Regular (원본)</div>
+      <div class="desc">Pretendard outline + Pretendard metrics</div>
+    </div>
+  </div>
+  <div class="legend-item metric-b-bg" style="border-left-color: var(--metric-b);">
+    <span class="swatch" style="background: var(--metric-b);"></span>
+    <div>
+      <div class="name f-npm">Polaris NPM (합성)</div>
+      <div class="desc">Noto outline + <strong>Pretendard metrics</strong></div>
+    </div>
+  </div>
+</div>
+
+
+
+<section>
+  <h2>1. 같은 텍스트, 4 폰트</h2>
+  <p class="muted">동일한 한 줄 텍스트가 폰트별로 어떻게 보이는지. 색상은
+    <strong>메트릭 그룹</strong>을 의미합니다 (외형 그룹이 아님).</p>
+  <h3>Hangul pangram</h3>
+<div class="sample f-noto"><span class="label">Noto (orig)</span>다람쥐 헌 쳇바퀴에 타고파.</div>
+<div class="sample f-pnm"><span class="label">Polaris PNM</span>다람쥐 헌 쳇바퀴에 타고파.</div>
+<div class="sample f-pretendard"><span class="label">Pretendard (orig)</span>다람쥐 헌 쳇바퀴에 타고파.</div>
+<div class="sample f-npm"><span class="label">Polaris NPM</span>다람쥐 헌 쳇바퀴에 타고파.</div>
+<h3>English pangram</h3>
+<div class="sample f-noto"><span class="label">Noto (orig)</span>The quick brown fox jumps over the lazy dog.</div>
+<div class="sample f-pnm"><span class="label">Polaris PNM</span>The quick brown fox jumps over the lazy dog.</div>
+<div class="sample f-pretendard"><span class="label">Pretendard (orig)</span>The quick brown fox jumps over the lazy dog.</div>
+<div class="sample f-npm"><span class="label">Polaris NPM</span>The quick brown fox jumps over the lazy dog.</div>
+<h3>Mixed script</h3>
+<div class="sample f-noto"><span class="label">Noto (orig)</span>한컴 폰트 메트릭 호환성 (compat) 검증 — 2026.</div>
+<div class="sample f-pnm"><span class="label">Polaris PNM</span>한컴 폰트 메트릭 호환성 (compat) 검증 — 2026.</div>
+<div class="sample f-pretendard"><span class="label">Pretendard (orig)</span>한컴 폰트 메트릭 호환성 (compat) 검증 — 2026.</div>
+<div class="sample f-npm"><span class="label">Polaris NPM</span>한컴 폰트 메트릭 호환성 (compat) 검증 — 2026.</div>
+<h3>Numerals + punct</h3>
+<div class="sample f-noto"><span class="label">Noto (orig)</span>0123456789  ,.:;!?'"()[]{}<>+=−×÷</div>
+<div class="sample f-pnm"><span class="label">Polaris PNM</span>0123456789  ,.:;!?'"()[]{}<>+=−×÷</div>
+<div class="sample f-pretendard"><span class="label">Pretendard (orig)</span>0123456789  ,.:;!?'"()[]{}<>+=−×÷</div>
+<div class="sample f-npm"><span class="label">Polaris NPM</span>0123456789  ,.:;!?'"()[]{}<>+=−×÷</div>
+</section>
+
+
+<section>
+  <h2>2. 라인브레이크 비교 (핵심)</h2>
+  <p>같은 너비 컨테이너에 같은 텍스트. <strong>같은 메트릭 그룹의 두 폰트는
+    동일한 위치에서 줄바꿈</strong>해야 합니다 — 외형이 달라도.</p>
+  <p class="note">
+    Group A (Noto 메트릭): Pretendard 외형을 Noto의 UPM(1000)으로
+    rescale → Noto 메트릭 적용 + GPOS 커닝 + GSUB locl 치환 이식.<br>
+    Group B (Pretendard 메트릭): Noto 외형을 Pretendard UPM(2048)으로
+    rescale → Pretendard 메트릭/커닝 적용. (rescale 결과가 Chromium TTF
+    sanitizer와 호환 안 되어 자동으로 WOFF2 컨테이너로 출력.)<br>
+    아래 컬럼은 모두 <code>lang="ko"</code>로 렌더링됩니다.
+  </p>
+
+  <h3 style="margin-top: 18px;">Group A — Noto metrics</h3>
+  <div class="linebreak-grid metric-a">
+    <div class="col">
+      <h3>NotoSansKR (원본)</h3>
+      <p class="f-noto" lang="ko">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+    </div>
+    <div class="col">
+      <h3>Polaris PNM <span class="muted">(Pretendard outline + Noto metrics)</span></h3>
+      <p class="f-pnm" lang="ko">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+    </div>
+  </div>
+  <p class="note">↑ 두 컬럼의 줄바꿈 위치가 같아야 정상. 글자의 굵기/형태는 달라도 됨.</p>
+
+  <h3 style="margin-top: 24px;">Group B — Pretendard metrics</h3>
+  <div class="linebreak-grid metric-b">
+    <div class="col">
+      <h3>Pretendard (원본)</h3>
+      <p class="f-pretendard" lang="ko">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+    </div>
+    <div class="col">
+      <h3>Polaris NPM <span class="muted">(Noto outline + Pretendard metrics)</span></h3>
+      <p class="f-npm" lang="ko">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+    </div>
+  </div>
+  <p class="note">↑ 마찬가지로, 두 컬럼의 줄바꿈 위치가 같아야 정상.</p>
+</section>
+
+
+<section>
+  <h2>3. <code>lang</code>이 라인브레이크에 미치는 영향 (스크립트별 GSUB)</h2>
+  <p>한국어 폰트는 종종 GSUB lookup으로 한국어 스크립트(<code>script=hang</code>) 컨텍스트에서
+    공백/구두점을 더 넓은 변형으로 치환합니다. 브라우저가 <code>lang="ko"</code>를
+    감지하면 이 치환이 활성화되어 폰트가 같은 메트릭이라도 라인 너비가 달라집니다.
+    Polaris MCFG는 메트릭(<code>hmtx</code>, <code>OS/2</code>, <code>head</code> 등)만 이식하며
+    GSUB은 디자인 폰트의 것을 그대로 사용합니다 — 따라서 lang에 따른 치환은
+    원본 폰트와 합성 폰트가 다르게 동작합니다.
+  </p>
+
+  <h3 style="margin-top: 18px;">같은 텍스트, 같은 폰트, lang만 다름</h3>
+  <table class="numbers" style="font-size: 14px;">
+    <thead>
+      <tr><th>Font</th><th>lang="en"</th><th>lang="ko"</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>NotoSansKR (원본)</td>
+        <td><span class="f-noto" lang="en">한글 사이 영문 mixed text 입니다</span></td>
+        <td><span class="f-noto" lang="ko">한글 사이 영문 mixed text 입니다</span></td>
+      </tr>
+      <tr>
+        <td>Polaris PNM</td>
+        <td><span class="f-pnm" lang="en">한글 사이 영문 mixed text 입니다</span></td>
+        <td><span class="f-pnm" lang="ko">한글 사이 영문 mixed text 입니다</span></td>
+      </tr>
+      <tr>
+        <td>Pretendard (원본)</td>
+        <td><span class="f-pretendard" lang="en">한글 사이 영문 mixed text 입니다</span></td>
+        <td><span class="f-pretendard" lang="ko">한글 사이 영문 mixed text 입니다</span></td>
+      </tr>
+      <tr>
+        <td>Polaris NPM</td>
+        <td><span class="f-npm" lang="en">한글 사이 영문 mixed text 입니다</span></td>
+        <td><span class="f-npm" lang="ko">한글 사이 영문 mixed text 입니다</span></td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="note">
+    Noto는 <code>lang="ko"</code>일 때 공백 advance를 약 25% 늘리는 GSUB lookup을 가집니다
+    (한글-라틴 사이 시각적 균형). Pretendard는 이 lookup이 없습니다.<br>
+    이 GSUB 차이는 메트릭 추출/적용 범위 밖입니다 — 글리프 substitution 데이터를
+    이식하려면 outline 데이터 권한(라이센스)이 필요해 의도적으로 제외했습니다.
+  </p>
+</section>
+
+
+<section>
+  <h2>4. 사이즈 사다리 (10 → 48px)</h2>
+  <p class="muted">동일 텍스트를 사이즈별로 나란히. 좌우 너비 차이가 메트릭 차이.</p>
+  <h3>NotoSansKR (orig) | Polaris PNM | Pretendard (orig) | Polaris NPM</h3><div class="size-ladder"><div class="row" style="font-size: 10px;"><span class="px">10px</span><span class="f-noto">한 글  English  0123</span><span class="f-pnm">한 글  English  0123</span><span class="f-pretendard">한 글  English  0123</span><span class="f-npm">한 글  English  0123</span></div><div class="row" style="font-size: 12px;"><span class="px">12px</span><span class="f-noto">한 글  English  0123</span><span class="f-pnm">한 글  English  0123</span><span class="f-pretendard">한 글  English  0123</span><span class="f-npm">한 글  English  0123</span></div><div class="row" style="font-size: 14px;"><span class="px">14px</span><span class="f-noto">한 글  English  0123</span><span class="f-pnm">한 글  English  0123</span><span class="f-pretendard">한 글  English  0123</span><span class="f-npm">한 글  English  0123</span></div><div class="row" style="font-size: 18px;"><span class="px">18px</span><span class="f-noto">한 글  English  0123</span><span class="f-pnm">한 글  English  0123</span><span class="f-pretendard">한 글  English  0123</span><span class="f-npm">한 글  English  0123</span></div><div class="row" style="font-size: 24px;"><span class="px">24px</span><span class="f-noto">한 글  English  0123</span><span class="f-pnm">한 글  English  0123</span><span class="f-pretendard">한 글  English  0123</span><span class="f-npm">한 글  English  0123</span></div><div class="row" style="font-size: 32px;"><span class="px">32px</span><span class="f-noto">한 글  English  0123</span><span class="f-pnm">한 글  English  0123</span><span class="f-pretendard">한 글  English  0123</span><span class="f-npm">한 글  English  0123</span></div><div class="row" style="font-size: 48px;"><span class="px">48px</span><span class="f-noto">한 글  English  0123</span><span class="f-pnm">한 글  English  0123</span><span class="f-pretendard">한 글  English  0123</span><span class="f-npm">한 글  English  0123</span></div></div>
+</section>
+
+
+<section>
+  <h2>5. 표 / 숫자 정렬</h2>
+  <p class="muted">컬럼 너비가 메트릭에 따라 달라지는지 — 합성된 폰트는 원본 메트릭과 동일한 컬럼 너비를 가져야 합니다.</p>
+  <table class="numbers">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Noto orig</th>
+        <th>Polaris PNM</th>
+        <th>Pretendard orig</th>
+        <th>Polaris NPM</th>
+        <th>%</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>2026-04-01</td><td class="f-noto">1,234,567</td><td class="f-pnm">1,234,567</td><td class="f-pretendard">1,234,567</td><td class="f-npm">1,234,567</td><td class="f-noto">+12.3%</td></tr><tr><td>2026-04-02</td><td class="f-noto">987,654</td><td class="f-pnm">987,654</td><td class="f-pretendard">987,654</td><td class="f-npm">987,654</td><td class="f-noto">-3.45%</td></tr><tr><td>2026-04-03</td><td class="f-noto">1,000,000</td><td class="f-pnm">1,000,000</td><td class="f-pretendard">1,000,000</td><td class="f-npm">1,000,000</td><td class="f-noto">+0.05%</td></tr><tr><td>2026-04-04</td><td class="f-noto">42</td><td class="f-pnm">42</td><td class="f-pretendard">42</td><td class="f-npm">42</td><td class="f-noto">0.00%</td></tr><tr><td>2026-04-05</td><td class="f-noto">777,777</td><td class="f-pnm">777,777</td><td class="f-pretendard">777,777</td><td class="f-npm">777,777</td><td class="f-noto">+88.8%</td></tr>
+    </tbody>
+  </table>
+</section>
+
+
+<section>
+  <h2>6. 문단 4분할 비교</h2>
+  <p class="muted">동일 너비, 동일 폰트 사이즈. 메트릭 그룹별로 줄바꿈이 일치해야 합니다.</p>
+  <div class="four-col">
+    <div class="col" style="border-top-color: var(--metric-a);">
+      <h3 style="color: var(--metric-a);">Noto (orig)</h3>
+      <p class="f-noto">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+    </div>
+    <div class="col" style="border-top-color: var(--metric-a);">
+      <h3 style="color: var(--metric-a);">Polaris PNM</h3>
+      <p class="f-pnm">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+    </div>
+    <div class="col" style="border-top-color: var(--metric-b);">
+      <h3 style="color: var(--metric-b);">Pretendard (orig)</h3>
+      <p class="f-pretendard">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+    </div>
+    <div class="col" style="border-top-color: var(--metric-b);">
+      <h3 style="color: var(--metric-b);">Polaris NPM</h3>
+      <p class="f-npm">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+    </div>
+  </div>
+</section>
+
+
+<section>
+  <h2>7. 글리프 클로즈업</h2>
+  <p class="muted">큰 사이즈에서 외형 차이를 직접 확인. 같은 그룹(같은 색)은 advance 폭이
+    동일하고, 다른 그룹은 advance가 다릅니다 — 셀의 너비를 보세요.</p>
+  
+<div class="glyph-grid">
+  <div class="cell" style="border-top-color: var(--metric-a);">
+    <div class="small">Noto (orig)</div>
+    <div class="big f-noto">가</div>
+  </div>
+  <div class="cell" style="border-top-color: var(--metric-a);">
+    <div class="small">Polaris PNM</div>
+    <div class="big f-pnm">가</div>
+  </div>
+  <div class="cell" style="border-top-color: var(--metric-b);">
+    <div class="small">Pretendard (orig)</div>
+    <div class="big f-pretendard">가</div>
+  </div>
+  <div class="cell" style="border-top-color: var(--metric-b);">
+    <div class="small">Polaris NPM</div>
+    <div class="big f-npm">가</div>
+  </div>
+</div>
+
+<div class="glyph-grid">
+  <div class="cell" style="border-top-color: var(--metric-a);">
+    <div class="small">Noto (orig)</div>
+    <div class="big f-noto">M</div>
+  </div>
+  <div class="cell" style="border-top-color: var(--metric-a);">
+    <div class="small">Polaris PNM</div>
+    <div class="big f-pnm">M</div>
+  </div>
+  <div class="cell" style="border-top-color: var(--metric-b);">
+    <div class="small">Pretendard (orig)</div>
+    <div class="big f-pretendard">M</div>
+  </div>
+  <div class="cell" style="border-top-color: var(--metric-b);">
+    <div class="small">Polaris NPM</div>
+    <div class="big f-npm">M</div>
+  </div>
+</div>
+
+<div class="glyph-grid">
+  <div class="cell" style="border-top-color: var(--metric-a);">
+    <div class="small">Noto (orig)</div>
+    <div class="big f-noto">8</div>
+  </div>
+  <div class="cell" style="border-top-color: var(--metric-a);">
+    <div class="small">Polaris PNM</div>
+    <div class="big f-pnm">8</div>
+  </div>
+  <div class="cell" style="border-top-color: var(--metric-b);">
+    <div class="small">Pretendard (orig)</div>
+    <div class="big f-pretendard">8</div>
+  </div>
+  <div class="cell" style="border-top-color: var(--metric-b);">
+    <div class="small">Polaris NPM</div>
+    <div class="big f-npm">8</div>
+  </div>
+</div>
+
+<div class="glyph-grid">
+  <div class="cell" style="border-top-color: var(--metric-a);">
+    <div class="small">Noto (orig)</div>
+    <div class="big f-noto">@</div>
+  </div>
+  <div class="cell" style="border-top-color: var(--metric-a);">
+    <div class="small">Polaris PNM</div>
+    <div class="big f-pnm">@</div>
+  </div>
+  <div class="cell" style="border-top-color: var(--metric-b);">
+    <div class="small">Pretendard (orig)</div>
+    <div class="big f-pretendard">@</div>
+  </div>
+  <div class="cell" style="border-top-color: var(--metric-b);">
+    <div class="small">Polaris NPM</div>
+    <div class="big f-npm">@</div>
+  </div>
+</div>
+
+</section>
+
+
+<footer style="margin-top: 48px; border-top: 1px solid #ddd; padding-top: 12px; font-size: 12px; color: #888;">
+  <p>
+    <strong>License:</strong> Polaris NPM &amp; Polaris PNM are derivative works
+    of NotoSansKR / Pretendard, distributed under the
+    <a href="https://scripts.sil.org/OFL">SIL Open Font License 1.1</a>
+    with new family names per OFL Reserved Font Name policy.
+    See <a href="fonts/OFL-NotoSansKR.txt">OFL-NotoSansKR.txt</a> /
+    <a href="fonts/OFL-Pretendard.txt">OFL-Pretendard.txt</a> for the original copyrights.
+  </p>
+</footer>
+</body>
+</html>
