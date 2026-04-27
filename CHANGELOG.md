@@ -2,6 +2,61 @@
 
 All notable changes to Polaris MCFG.
 
+## [0.2.2] — 2026-04-27 — code review bundle
+
+Bundle of fixes from the v0.2.1 self-review. Tests 79 → 84.
+
+### Fixed
+- **`pyproject.toml` version** was stuck at `0.1.0`; now tracks the
+  CHANGELOG (`__version__` matches).
+- **`_check_lsb` crash on partial-None LSBs**: when one spec extracted
+  LSBs and the other didn't, `abs(a - r)` raised on `None`. Now the
+  per-glyph filter skips any pair with a `None` side rather than
+  failing.
+- **WOFF2 reference fonts in `validate --against` and `compare`**:
+  `_FONT_SUFFIXES` now includes `.woff` / `.woff2`, and the rendering
+  check accepts those suffixes too. `render._hb_readable_path` context
+  manager transparently decompresses WOFF/WOFF2 to a temp TTF for
+  HarfBuzz, which can't read the compressed flavors directly.
+- **`uharfbuzz` install hint**: error messages no longer point at the
+  not-yet-published `polaris-mcfg[render]` PyPI extra; they direct
+  users to `pip install -e '.[dev]'` from a checkout, or
+  `pip install uharfbuzz` standalone.
+- **kerning diff now honors `--threshold`**: was only used for global /
+  advance / lsb / vertical; now the kerning section drops
+  ±threshold-or-less differences too, matching the rest.
+- **`--missing-glyph notdef` actually does what it says**: previously
+  only set the design font's `.notdef` advance and counted missings;
+  now also routes the missing codepoints to a notdef-equivalent stub
+  glyph (`polaris.notdef_fallback`, empty outline + `.notdef`'s
+  advance) added to the cmap. fontTools drops cmap-to-`.notdef`
+  entries on compile because OpenType treats them as implicit, so a
+  distinct stub keeps the routing explicit.
+
+### Cleanup
+- Removed unused `asdict` import from `schema.py`.
+- Removed orphan comment in `generator.py` (line 509 reference to a
+  defunct type-signature change).
+- `MetricsSpec` docstring now explains the byte-deterministic fixed
+  key order rather than just saying "deterministic".
+- Stale milestone references (`v1`, `M6 deferred`) replaced with
+  current-state language across module docstrings.
+- `EXTRACTED_FIELDS` dangling reference in `schema.py` corrected to
+  the actual constant names (`HEAD_FIELDS`, etc.).
+- `docs/design/03-extractor.md` updated to reflect GPOS pair
+  extraction (was still claiming "kern format 0 only") and the new
+  `--include-gsub` flag.
+
+### Added (regression tests)
+- `tests/test_review_fixes.py` (5 tests):
+  - notdef remap routes missing codepoints to a stub glyph in the cmap.
+  - skip mode does NOT add a stub or touch the cmap.
+  - kerning diff with `threshold=1` masks ±1u differences.
+  - LSB check skips when reference spec has no LSBs (no crash).
+  - Validator's rendering check works with WOFF2 reference fonts.
+
+---
+
 ## [0.2.1] — 2026-04-27 — GitHub Pages demo + locl strip refinement
 
 ### Added

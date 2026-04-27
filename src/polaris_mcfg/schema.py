@@ -8,7 +8,7 @@ JSON keys, except ``global`` which is reserved (we expose it as
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Any
 
 SCHEMA_VERSION = 1
@@ -67,7 +67,8 @@ class GlobalMetrics:
     """Layout-affecting global metrics, mirrored from ``head/hhea/OS/2/post``.
 
     Every field is a plain dict to keep round-tripping trivial. Field membership
-    is fixed by ``EXTRACTED_FIELDS`` in ``extractor.py``.
+    is fixed by the per-table ``*_FIELDS`` tuples in ``extractor.py``
+    (``HEAD_FIELDS``, ``HHEA_FIELDS``, ``OS2_FIELDS``, ``POST_FIELDS``).
     """
     unitsPerEm: int
     head: dict[str, Any] = field(default_factory=dict)
@@ -143,8 +144,11 @@ class VerticalMetrics:
 class MetricsSpec:
     """Top-level spec.
 
-    JSON serialization sorts ``glyphs`` and ``vmtx`` by identifier so that
-    output is deterministic for byte-for-byte comparison.
+    JSON serialization is deterministic by construction:
+    ``to_dict()`` builds the top-level dict in a fixed key order
+    (``schemaVersion``, ``source``, ``global``, ``glyphs``, …) and sorts
+    ``glyphs`` / ``kerning`` / ``vmtx`` / ``shapedAdvances`` by identifier.
+    ``to_json()`` therefore uses ``sort_keys=False`` to preserve that order.
     """
     schemaVersion: int = SCHEMA_VERSION
     source: dict[str, Any] = field(default_factory=dict)

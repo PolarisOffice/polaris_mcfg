@@ -8,9 +8,13 @@ when it isn't installed, but only at the point of use.
 """
 from __future__ import annotations
 
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
+
+from fontTools.ttLib import TTFont
 
 try:
     import uharfbuzz as hb
@@ -24,8 +28,9 @@ else:
 def _require_hb() -> None:
     if hb is None:  # pragma: no cover
         raise RuntimeError(
-            "uharfbuzz is required for rendering tests. "
-            "Install with: pip install 'polaris-mcfg[render]'"
+            "uharfbuzz is required for rendering tests but is not installed. "
+            "From a checkout: `pip install -e '.[dev]'`. "
+            "Standalone: `pip install uharfbuzz`."
         ) from _HB_IMPORT_ERROR
 
 
@@ -61,26 +66,70 @@ class RenderComparison:
         }
 
 
+@contextmanager
+def _hb_readable_path(font_path: str | Path):
+    """Yield a path HarfBuzz can read directly.
+
+    HarfBuzz/uharfbuzz reads OpenType from raw TTF/OTF bytes; it does *not*
+    transparently decompress WOFF / WOFF2. For those flavors we materialize
+    a TTF copy in a temp file and yield that.
+    """
+    p = Path(font_path)
+    if p.suffix.lower() in (".woff", ".woff2"):
+        ft = TTFont(str(p))
+        ft.flavor = None
+        with tempfile.NamedTemporaryFile(suffix=".ttf", delete=False) as tmp:
+            ft.save(tmp.name)
+            ft.close()
+            try:
+                yield tmp.name
+            finally:
+                Path(tmp.name).unlink(missing_ok=True)
+    else:
+        yield str(p)
+
+
 def measure_line(font_path: str | Path, text: str) -> LineMeasurement:
     """Shape ``text`` with the font and return the total x-advance."""
     _require_hb()
-    blob = hb.Blob.from_file_path(str(font_path))
-    face = hb.Face(blob)
-    font = hb.Font(face)
+    with _hb_readable_path(font_path) as path:
+        blob = hb.Blob.from_file_path(path)
+        face = hb.Face(blob)
+        font = hb.Font(face)
 
-    buf = hb.Buffer()
-    buf.add_str(text)
-    buf.guess_segment_properties()
-    hb.shape(font, buf)
+        buf = hb.Buffer()
+        buf.add_str(text)
+        buf.guess_segment_properties()
+        hb.shape(font, buf)
 
-    width = sum(p.x_advance for p in buf.glyph_positions)
+        width = sum(p.x_advance for p in buf.glyph_positions)
     return LineMeasurement(text=text, width=width,
                            glyph_count=len(buf.glyph_positions))
 
 
 def measure_lines(font_path: str | Path,
                   texts: Iterable[str]) -> list[LineMeasurement]:
-    return [measure_line(font_path, t) for t in texts if t]
+    """Shape multiple texts with one font handle (avoids re-opening)."""
+    _require_hb()
+    text_list = [t for t in texts if t]
+    if not text_list:
+        return []
+    with _hb_readable_path(font_path) as path:
+        blob = hb.Blob.from_file_path(path)
+        face = hb.Face(blob)
+        font = hb.Font(face)
+        out: list[LineMeasurement] = []
+        for t in text_list:
+            buf = hb.Buffer()
+            buf.add_str(t)
+            buf.guess_segment_properties()
+            hb.shape(font, buf)
+            out.append(LineMeasurement(
+                text=t,
+                width=sum(p.x_advance for p in buf.glyph_positions),
+                glyph_count=len(buf.glyph_positions),
+            ))
+    return out
 
 
 def compare_rendering(font_a: str | Path, font_b: str | Path,
@@ -97,9 +146,10 @@ def compare_rendering(font_a: str | Path, font_b: str | Path,
     a_meas = measure_lines(font_a, text_list)
     b_meas = measure_lines(font_b, text_list)
 
-    a_face = hb.Face(hb.Blob.from_file_path(str(font_a)))
-    b_face = hb.Face(hb.Blob.from_file_path(str(font_b)))
-    upem_a, upem_b = a_face.upem, b_face.upem
+    with _hb_readable_path(font_a) as p_a, _hb_readable_path(font_b) as p_b:
+        a_face = hb.Face(hb.Blob.from_file_path(p_a))
+        b_face = hb.Face(hb.Blob.from_file_path(p_b))
+        upem_a, upem_b = a_face.upem, b_face.upem
 
     cmp = RenderComparison(font_a=str(font_a), font_b=str(font_b),
                            upem_a=upem_a, upem_b=upem_b,

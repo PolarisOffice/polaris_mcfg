@@ -178,14 +178,23 @@ def _check_glyph_coverage(actual: MetricsSpec, ref: MetricsSpec) -> CheckResult:
 
 def _check_lsb(actual: MetricsSpec, ref: MetricsSpec,
                tolerance: int) -> CheckResult | None:
-    """Compare LSB only when *both* specs include it."""
+    """Compare LSB only when *both* specs include it.
+
+    Per-glyph: if either side's LSB is ``None`` (only one spec extracted
+    LSBs, or extractor skipped a particular glyph) we skip that pair
+    rather than raise — matches the comparator's tolerant behavior. The
+    check itself returns ``None`` (i.e., is omitted) when no glyph has
+    LSB on *both* sides; that's the signal that LSBs aren't part of the
+    comparison at all.
+    """
     pairs = [(k, actual.glyphs[k].lsb, ref.glyphs[k].lsb)
              for k in set(actual.glyphs) & set(ref.glyphs)
              if actual.glyphs[k].lsb is not None
              and ref.glyphs[k].lsb is not None]
     if not pairs:
         return None
-    bad = [(g, a, r) for g, a, r in pairs if abs(a - r) > tolerance]
+    bad = [(g, a, r) for g, a, r in pairs
+           if a is not None and r is not None and abs(a - r) > tolerance]
     if bad:
         return CheckResult(
             "lsb_match", False,
@@ -331,10 +340,10 @@ def validate_font(font_path: str | Path, against: str | Path,
             report.checks.append(opt)
     report.checks.append(_check_name_metadata(font))
 
-    # Rendering regression — only if --against is a font file and
-    # render_texts is provided.
-    if render_texts and Path(against).suffix.lower() in (".ttf", ".otf"):
-        rcheck = _check_rendering(font_path, Path(against),
+    # Rendering regression — only if --against is a font file (TTF, OTF
+    # or WOFF2 — HarfBuzz handles all three) and render_texts is provided.
+    if render_texts and against.suffix.lower() in (".ttf", ".otf", ".woff2"):
+        rcheck = _check_rendering(font_path, against,
                                   render_texts, render_tolerance_pct)
         if rcheck is not None:
             report.checks.append(rcheck)

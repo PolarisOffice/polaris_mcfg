@@ -5,8 +5,8 @@ Produces a :class:`MetricsDiff` capturing:
 * glyph advance-width differences (common / only-in-a / only-in-b / stats)
 * optional LSB / kerning / vertical diffs (when both specs include them)
 
-Output formatters: ``text`` (human summary), ``json`` (machine-readable).
-HTML output is added in M6.
+Output formatters: ``text`` (human summary), ``json`` (machine-readable),
+``html`` (self-contained page with inline SVG histogram, see ``report.py``).
 """
 from __future__ import annotations
 
@@ -23,8 +23,9 @@ from .schema import GlyphMetric, MetricsSpec
 
 #: Filename suffixes treated as JSON metric specs.
 _JSON_SUFFIXES = frozenset({".json"})
-#: Filename suffixes treated as font files.
-_FONT_SUFFIXES = frozenset({".ttf", ".otf"})
+#: Filename suffixes treated as font files. WOFF2 is decompressed by
+#: fontTools transparently so it works as input wherever TTF/OTF do.
+_FONT_SUFFIXES = frozenset({".ttf", ".otf", ".woff2", ".woff"})
 
 
 def load_spec(path: str | Path, *, deterministic: bool = True,
@@ -49,7 +50,8 @@ def load_spec(path: str | Path, *, deterministic: bool = True,
             deterministic=deterministic,
         )
     raise click.BadParameter(
-        f"unrecognised file type {suf!r} (want .json/.ttf/.otf): {p}")
+        f"unrecognised file type {suf!r} "
+        f"(want .json/.ttf/.otf/.woff2): {p}")
 
 
 # ---------- diff data model ----------
@@ -262,7 +264,7 @@ def _lsb_diff(a_glyphs: dict[str, GlyphMetric],
     return diff
 
 
-def _kerning_diff(a_pairs, b_pairs) -> KerningDiff | None:
+def _kerning_diff(a_pairs, b_pairs, *, threshold: int = 0) -> KerningDiff | None:
     if a_pairs is None and b_pairs is None:
         return None
     a_map = {f"{p.left}|{p.right}": p.value for p in (a_pairs or [])}
@@ -272,8 +274,10 @@ def _kerning_diff(a_pairs, b_pairs) -> KerningDiff | None:
         only_in_b=sorted(set(b_map) - set(a_map)),
     )
     for k in sorted(set(a_map) & set(b_map)):
-        if a_map[k] != b_map[k]:
-            diff.common[k] = [a_map[k], b_map[k], b_map[k] - a_map[k]]
+        delta = b_map[k] - a_map[k]
+        if abs(delta) <= threshold:
+            continue
+        diff.common[k] = [a_map[k], b_map[k], delta]
     return diff
 
 
@@ -328,7 +332,7 @@ def diff_specs(a: MetricsSpec, b: MetricsSpec, *,
         normalize_upm=(a_upm, b_upm) if normalize_upm else None,
     )
     lsb = _lsb_diff(a.glyphs, b.glyphs, threshold=threshold)
-    kern = _kerning_diff(a.kerning, b.kerning)
+    kern = _kerning_diff(a.kerning, b.kerning, threshold=threshold)
     vert = _vertical_diff(a.vertical, b.vertical, threshold=threshold)
 
     return MetricsDiff(

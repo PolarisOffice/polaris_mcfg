@@ -278,8 +278,9 @@ def _extract_shaped_advances(
         import uharfbuzz as hb
     except ImportError as e:
         raise RuntimeError(
-            "uharfbuzz is required for include_gsub=True. "
-            "Install with: pip install 'polaris-mcfg[render]'"
+            "include_gsub=True requires uharfbuzz but it is not installed. "
+            "From a checkout: `pip install -e '.[dev]'`. "
+            "Standalone: `pip install uharfbuzz`."
         ) from e
 
     blob = hb.Blob.from_file_path(str(font_path))

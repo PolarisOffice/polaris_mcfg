@@ -3,8 +3,8 @@
 The design font's outlines are preserved; only the metric tables and (when
 ``--scale-glyph`` is not ``none``) per-glyph horizontal placement are altered.
 
-Supported design font format in v1: TrueType (``glyf``). CFF/OTF designs raise
-a clear error and are deferred.
+Currently supported design font format: TrueType (``glyf``). CFF/OTF designs
+raise a clear error; CFF rescaling support is deferred to a later release.
 """
 from __future__ import annotations
 
@@ -91,31 +91,44 @@ def _apply_advance_and_lsb(font: TTFont, metrics: MetricsSpec,
                            id_to_name: dict[str, str | None],
                            scale_mode: str, include_lsb: bool,
                            missing_mode: str) -> dict[str, Any]:
+    """Apply advance widths (and optionally LSBs) from ``metrics`` to ``font``.
+
+    ``missing_mode`` controls what happens to source codepoints that the
+    design font doesn't carry:
+
+    * ``skip``: count and ignore. Browsers fall back to a system font for
+      that codepoint, with whatever advance the system font defines.
+    * ``notdef``: route the missing codepoint to the design font's
+      ``.notdef`` glyph by inserting it into the cmap, *and* set
+      ``.notdef``'s advance to match the source font's ``.notdef`` so
+      the layout slot matches the source font's intent.
+
+    The ``.notdef`` advance update is done at the end of the per-glyph loop
+    rather than the start, so a source spec that explicitly carries
+    ``glyph#.notdef`` still wins (it goes through the normal loop path).
+    """
     src_upm = metrics.global_metrics.unitsPerEm
     dst_upm = font["head"].unitsPerEm
 
     hmtx = font["hmtx"]
     glyf = font.get("glyf")
-    stats = {"applied": 0, "missing": 0, "scaled": 0, "centered": 0}
+    stats: dict[str, Any] = {
+        "applied": 0, "missing": 0, "scaled": 0, "centered": 0,
+        "notdefRemapped": 0,
+    }
 
-    notdef_advance: int | None = None
-    if missing_mode == "notdef" and ".notdef" in hmtx.metrics:
-        # Align design font's .notdef advance with the source's, so glyphs
-        # that fall back to .notdef occupy the same horizontal slot the
-        # source font would have used. The source spec exposes .notdef
-        # under the ``glyph#.notdef`` identifier (it has no codepoint).
-        src_notdef = metrics.glyphs.get("glyph#.notdef")
-        if src_notdef is not None:
-            notdef_advance = _scaled(src_notdef.advanceWidth, src_upm, dst_upm)
-            old_lsb = hmtx.metrics[".notdef"][1]
-            hmtx.metrics[".notdef"] = (notdef_advance, old_lsb)
-        else:
-            notdef_advance = hmtx.metrics[".notdef"][0]
+    missing_codepoints: list[int] = []
 
     for gid, gm in metrics.glyphs.items():
         gname = id_to_name.get(gid)
         if gname is None or gname not in hmtx.metrics:
             stats["missing"] += 1
+            # Track codepoints we could re-route to .notdef later.
+            if gid.startswith("U+"):
+                try:
+                    missing_codepoints.append(int(gid[2:], 16))
+                except ValueError:
+                    pass
             continue
 
         old_advance, old_lsb = hmtx.metrics[gname]
@@ -146,13 +159,74 @@ def _apply_advance_and_lsb(font: TTFont, metrics: MetricsSpec,
         hmtx.metrics[gname] = (new_advance, new_lsb)
         stats["applied"] += 1
 
-    # Apply missing-glyph policy: nothing to do for "skip" (already counted).
-    # "notdef" doesn't need us to touch hmtx — the design font's .notdef is
-    # already there; consumers shape the missing codepoint to that glyph.
-    if missing_mode == "notdef":
-        stats["notdefAdvance"] = notdef_advance
+    if missing_mode == "notdef" and ".notdef" in hmtx.metrics:
+        stats["notdefAdvance"] = _route_missing_to_notdef(
+            font, metrics, missing_codepoints, src_upm, dst_upm,
+        )
+        stats["notdefRemapped"] = len(missing_codepoints)
 
     return stats
+
+
+#: Name of the synthetic stub glyph the generator inserts so missing-glyph
+#: codepoints can survive cmap compile (fontTools drops .notdef-targeted
+#: cmap entries because OpenType treats them as implicit). Internally the
+#: glyph is a copy of ``.notdef``'s advance with no outline, so behaviour
+#: is identical to falling back to ``.notdef`` while remaining explicit
+#: in the cmap.
+_NOTDEF_STUB_NAME = "polaris.notdef_fallback"
+
+
+def _route_missing_to_notdef(
+    font: TTFont, metrics: MetricsSpec,
+    missing_codepoints: list[int],
+    src_upm: int, dst_upm: int,
+) -> int:
+    """Route ``missing_codepoints`` to a notdef-equivalent stub glyph.
+
+    1. Update ``.notdef``'s advance to match the source's (visual slot).
+    2. Insert a stub glyph with the same advance (empty outline, OpenType
+       considers .notdef-as-cmap-target implicit and drops it on compile,
+       so we use a distinct stub to keep the routing explicit).
+    3. Add the stub to every Unicode cmap subtable for each missing
+       codepoint that wasn't already present.
+
+    Returns the resulting ``.notdef`` advance in design units.
+    """
+    from fontTools.ttLib.tables._g_l_y_f import Glyph
+
+    hmtx = font["hmtx"]
+
+    src_notdef = metrics.glyphs.get("glyph#.notdef")
+    if src_notdef is not None:
+        notdef_advance = _scaled(src_notdef.advanceWidth, src_upm, dst_upm)
+        old_lsb = hmtx.metrics[".notdef"][1]
+        hmtx.metrics[".notdef"] = (notdef_advance, old_lsb)
+    else:
+        notdef_advance = hmtx.metrics[".notdef"][0]
+
+    if not missing_codepoints or "cmap" not in font:
+        return notdef_advance
+
+    # Add the stub glyph if not already present.
+    glyph_order = list(font.getGlyphOrder())
+    if _NOTDEF_STUB_NAME not in glyph_order:
+        stub = Glyph()
+        stub.numberOfContours = 0
+        font["glyf"][_NOTDEF_STUB_NAME] = stub
+        glyph_order.append(_NOTDEF_STUB_NAME)
+        font.setGlyphOrder(glyph_order)
+        font["maxp"].numGlyphs = len(glyph_order)
+        hmtx.metrics[_NOTDEF_STUB_NAME] = (notdef_advance, 0)
+
+    cmap_table = font["cmap"]
+    for sub in cmap_table.tables:
+        if not sub.isUnicode():
+            continue
+        for cp in missing_codepoints:
+            if cp not in sub.cmap:
+                sub.cmap[cp] = _NOTDEF_STUB_NAME
+    return notdef_advance
 
 
 def _apply_kerning(font: TTFont, metrics: MetricsSpec,
@@ -160,9 +234,9 @@ def _apply_kerning(font: TTFont, metrics: MetricsSpec,
     """Apply kerning to both classic ``kern`` and the GPOS ``kern`` feature.
 
     Browsers and modern shapers prefer GPOS over the classic ``kern`` table
-    for OpenType fonts, so writing only ``kern`` (as v1 did) was effectively
-    invisible to most renderers when the design font already had a GPOS
-    ``kern`` feature. We now:
+    for OpenType fonts, so writing only ``kern`` (as the v0.1 generator did)
+    was effectively invisible to most renderers when the design font
+    already had a GPOS ``kern`` feature. We now:
 
     1. Write a classic ``kern`` table for legacy shapers.
     2. Replace the design font's GPOS pair-positioning lookups with a new
@@ -506,9 +580,6 @@ def _strip_locl_feature(font: TTFont) -> int:
     return len(locl_feat_indices)
 
 
-# Backward compat for the type signature change in the inline dict above.
-
-
 def _apply_vertical(font: TTFont, metrics: MetricsSpec,
                     id_to_name: dict[str, str | None]) -> dict[str, Any]:
     if metrics.vertical is None:
@@ -621,7 +692,7 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
     if "glyf" not in font:
         raise click.UsageError(
             "design font must be TrueType (`glyf` table required); "
-            "CFF/OTF designs are not supported in v1.")
+            "CFF/OTF designs are not currently supported.")
 
     # When source and design UPMs differ, applying source metrics to the
     # design at design's UPM introduces ±0.5-unit per-glyph rounding. That
