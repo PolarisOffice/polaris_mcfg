@@ -41,6 +41,7 @@ Thumbs.db
 tests/_tmp/
 samples/_tmp/
 samples/out/
+samples/visual_test/out/
 
 # Locally downloaded font assets (Noto Sans KR etc.) — too large for git
 # Samples reference fonts/ via paths the user provides locally.
