@@ -79,9 +79,13 @@ def main() -> int:
           f"descent={pret_spec.global_metrics.hhea['descent']}")
 
     print("[3/4] generating cross-pollinated fonts ...")
+    # match_upm=True rescales the design font to the source's UPM before
+    # applying metrics — required for byte-perfect advance widths and so
+    # line-break positions match exactly across the metric pair.
     s1 = generate_font(
         pret_spec, NOTO, polaris_npm,
         apply=("global", "advance"),
+        match_upm=True,
         family_name="Polaris NPM",  # Noto outline, Pretendard Metrics
         style_name="Regular",
         license_text="SIL Open Font License 1.1 (see source font)",
@@ -89,6 +93,7 @@ def main() -> int:
     s2 = generate_font(
         noto_spec, PRET, polaris_pnm,
         apply=("global", "advance"),
+        match_upm=True,
         family_name="Polaris PNM",  # Pretendard outline, Noto Metrics
         style_name="Regular",
         license_text="SIL Open Font License 1.1 (see source font)",
@@ -99,8 +104,11 @@ def main() -> int:
           f"missing={s2['advance']['missing']}")
 
     print("[4/4] writing index.html ...")
-    (OUT / "index.html").write_text(_render_html(), encoding="utf-8")
-    print(f"      -> {OUT / 'index.html'}")
+    import time
+    cache_buster = str(int(time.time()))
+    (OUT / "index.html").write_text(_render_html(cache_buster=cache_buster),
+                                    encoding="utf-8")
+    print(f"      -> {OUT / 'index.html'}  (cache-buster={cache_buster})")
 
     print()
     print("Done. To view:")
@@ -139,11 +147,12 @@ _TABLE_NUMBERS = [
 ]
 
 
-def _render_html() -> str:
-    css = _CSS
+def _render_html(*, cache_buster: str = "0") -> str:
+    css = _CSS.replace("__CB__", cache_buster)
     legend = _LEGEND_HTML
     sec1 = _section_single_lines()
     sec2 = _section_line_break_pairs()
+    sec_lang = _section_lang_effect()
     sec3 = _section_size_ladder()
     sec4 = _section_table_numbers()
     sec5 = _section_paragraph_4col()
@@ -171,6 +180,7 @@ def _render_html() -> str:
 
 {sec1}
 {sec2}
+{sec_lang}
 {sec3}
 {sec4}
 {sec5}
@@ -205,22 +215,22 @@ _CSS = """
 
 @font-face {
   font-family: 'OrigNoto';
-  src: url('fonts/00-NotoSansKR-Regular.ttf') format('truetype');
+  src: url('fonts/00-NotoSansKR-Regular.ttf?cb=__CB__') format('truetype');
   font-display: block;
 }
 @font-face {
   font-family: 'OrigPretendard';
-  src: url('fonts/01-Pretendard-Regular.ttf') format('truetype');
+  src: url('fonts/01-Pretendard-Regular.ttf?cb=__CB__') format('truetype');
   font-display: block;
 }
 @font-face {
   font-family: 'PolarisNPM';
-  src: url('fonts/02-Polaris-NotoOutline-PretendardMetrics.ttf') format('truetype');
+  src: url('fonts/02-Polaris-NotoOutline-PretendardMetrics.ttf?cb=__CB__') format('truetype');
   font-display: block;
 }
 @font-face {
   font-family: 'PolarisPNM';
-  src: url('fonts/03-Polaris-PretendardOutline-NotoMetrics.ttf') format('truetype');
+  src: url('fonts/03-Polaris-PretendardOutline-NotoMetrics.ttf?cb=__CB__') format('truetype');
   font-display: block;
 }
 
@@ -390,37 +400,104 @@ def _section_single_lines() -> str:
 
 def _section_line_break_pairs() -> str:
     p = _PARAGRAPH_KO
+    # NOTE: lang="en" intentionally bypasses the browser's Korean-script
+    # shaping (which triggers GSUB substitutions in Noto, e.g., wider
+    # ideographic space). With lang="en" the shaper uses raw cmap+hmtx,
+    # which is what MCFG actually controls. The next section shows the
+    # ko-vs-en effect explicitly.
     return f"""
 <section>
   <h2>2. 라인브레이크 비교 (핵심)</h2>
   <p>같은 너비 컨테이너에 같은 텍스트. <strong>같은 메트릭 그룹의 두 폰트는
     동일한 위치에서 줄바꿈</strong>해야 합니다 — 외형이 달라도.</p>
+  <p class="note">
+    Group A (Noto 메트릭, UPM=1000): Pretendard 외형을 Noto의 UPM으로
+    downscale한 뒤 메트릭 적용 — <strong>완전 일치</strong> 기대.<br>
+    Group B (Pretendard 메트릭, UPM=2048): Noto 외형을 Pretendard UPM으로
+    upscale하는 경로가 fontTools/Chromium 호환성 이슈로 비활성화되어,
+    Noto 외형(UPM=1000)에 Pretendard 메트릭을 1000 단위로 라운딩하여 적용 —
+    글리프당 ±0.5 unit 라운딩으로 긴 라인에서 1~2자 표류 가능.<br>
+    아래 컬럼은 모두 <code>lang="en"</code>으로 렌더링됩니다 (스크립트별
+    GSUB 치환을 우회 — §3 참고).
+  </p>
 
-  <h3 style="margin-top: 18px;">Group A — Noto metrics</h3>
+  <h3 style="margin-top: 18px;">Group A — Noto metrics (UPM 정합, 완전 일치 기대)</h3>
   <div class="linebreak-grid metric-a">
     <div class="col">
       <h3>NotoSansKR (원본)</h3>
-      <p class="f-noto">{p}</p>
+      <p class="f-noto" lang="en">{p}</p>
     </div>
     <div class="col">
       <h3>Polaris PNM <span class="muted">(Pretendard outline + Noto metrics)</span></h3>
-      <p class="f-pnm">{p}</p>
+      <p class="f-pnm" lang="en">{p}</p>
     </div>
   </div>
   <p class="note">↑ 두 컬럼의 줄바꿈 위치가 같아야 정상. 글자의 굵기/형태는 달라도 됨.</p>
 
-  <h3 style="margin-top: 24px;">Group B — Pretendard metrics</h3>
+  <h3 style="margin-top: 24px;">Group B — Pretendard metrics (UPM 라운딩, 약간 표류 가능)</h3>
   <div class="linebreak-grid metric-b">
     <div class="col">
       <h3>Pretendard (원본)</h3>
-      <p class="f-pretendard">{p}</p>
+      <p class="f-pretendard" lang="en">{p}</p>
     </div>
     <div class="col">
       <h3>Polaris NPM <span class="muted">(Noto outline + Pretendard metrics)</span></h3>
-      <p class="f-npm">{p}</p>
+      <p class="f-npm" lang="en">{p}</p>
     </div>
   </div>
   <p class="note">↑ 마찬가지로, 두 컬럼의 줄바꿈 위치가 같아야 정상.</p>
+</section>
+"""
+
+
+def _section_lang_effect() -> str:
+    """Show how lang attribute changes shaping for fonts with Korean GSUB."""
+    short = "한글 사이 영문 mixed text 입니다"
+    return f"""
+<section>
+  <h2>3. <code>lang</code>이 라인브레이크에 미치는 영향 (스크립트별 GSUB)</h2>
+  <p>한국어 폰트는 종종 GSUB lookup으로 한국어 스크립트(<code>script=hang</code>) 컨텍스트에서
+    공백/구두점을 더 넓은 변형으로 치환합니다. 브라우저가 <code>lang="ko"</code>를
+    감지하면 이 치환이 활성화되어 폰트가 같은 메트릭이라도 라인 너비가 달라집니다.
+    Polaris MCFG는 메트릭(<code>hmtx</code>, <code>OS/2</code>, <code>head</code> 등)만 이식하며
+    GSUB은 디자인 폰트의 것을 그대로 사용합니다 — 따라서 lang에 따른 치환은
+    원본 폰트와 합성 폰트가 다르게 동작합니다.
+  </p>
+
+  <h3 style="margin-top: 18px;">같은 텍스트, 같은 폰트, lang만 다름</h3>
+  <table class="numbers" style="font-size: 14px;">
+    <thead>
+      <tr><th>Font</th><th>lang="en"</th><th>lang="ko"</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>NotoSansKR (원본)</td>
+        <td><span class="f-noto" lang="en">{short}</span></td>
+        <td><span class="f-noto" lang="ko">{short}</span></td>
+      </tr>
+      <tr>
+        <td>Polaris PNM</td>
+        <td><span class="f-pnm" lang="en">{short}</span></td>
+        <td><span class="f-pnm" lang="ko">{short}</span></td>
+      </tr>
+      <tr>
+        <td>Pretendard (원본)</td>
+        <td><span class="f-pretendard" lang="en">{short}</span></td>
+        <td><span class="f-pretendard" lang="ko">{short}</span></td>
+      </tr>
+      <tr>
+        <td>Polaris NPM</td>
+        <td><span class="f-npm" lang="en">{short}</span></td>
+        <td><span class="f-npm" lang="ko">{short}</span></td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="note">
+    Noto는 <code>lang="ko"</code>일 때 공백 advance를 약 25% 늘리는 GSUB lookup을 가집니다
+    (한글-라틴 사이 시각적 균형). Pretendard는 이 lookup이 없습니다.<br>
+    이 GSUB 차이는 메트릭 추출/적용 범위 밖입니다 — 글리프 substitution 데이터를
+    이식하려면 outline 데이터 권한(라이센스)이 필요해 의도적으로 제외했습니다.
+  </p>
 </section>
 """
 
@@ -443,7 +520,7 @@ def _section_size_ladder() -> str:
     rows.append('</div>')
     return f"""
 <section>
-  <h2>3. 사이즈 사다리 (10 → 48px)</h2>
+  <h2>4. 사이즈 사다리 (10 → 48px)</h2>
   <p class="muted">동일 텍스트를 사이즈별로 나란히. 좌우 너비 차이가 메트릭 차이.</p>
   {''.join(rows)}
 </section>
@@ -463,7 +540,7 @@ def _section_table_numbers() -> str:
         )
     return f"""
 <section>
-  <h2>4. 표 / 숫자 정렬</h2>
+  <h2>5. 표 / 숫자 정렬</h2>
   <p class="muted">컬럼 너비가 메트릭에 따라 달라지는지 — 합성된 폰트는 원본 메트릭과 동일한 컬럼 너비를 가져야 합니다.</p>
   <table class="numbers">
     <thead>
@@ -488,7 +565,7 @@ def _section_paragraph_4col() -> str:
     p_ko = _PARAGRAPH_KO
     return f"""
 <section>
-  <h2>5. 문단 4분할 비교</h2>
+  <h2>6. 문단 4분할 비교</h2>
   <p class="muted">동일 너비, 동일 폰트 사이즈. 메트릭 그룹별로 줄바꿈이 일치해야 합니다.</p>
   <div class="four-col">
     <div class="col" style="border-top-color: var(--metric-a);">
@@ -538,7 +615,7 @@ def _section_glyph_grid() -> str:
 """)
     return f"""
 <section>
-  <h2>6. 글리프 클로즈업</h2>
+  <h2>7. 글리프 클로즈업</h2>
   <p class="muted">큰 사이즈에서 외형 차이를 직접 확인. 같은 그룹(같은 색)은 advance 폭이
     동일하고, 다른 그룹은 advance가 다릅니다 — 셀의 너비를 보세요.</p>
   {''.join(cells)}

@@ -266,6 +266,7 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
                   apply: Iterable[str] = ("global", "advance"),
                   scale_glyph: str = "none",
                   missing_glyph: str = "skip",
+                  match_upm: bool = False,
                   family_name: str | None = None,
                   style_name: str | None = None,
                   license_text: str | None = None,
@@ -285,6 +286,38 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
             "design font must be TrueType (`glyf` table required); "
             "CFF/OTF designs are not supported in v1.")
 
+    # When source and design UPMs differ, applying source metrics to the
+    # design at design's UPM introduces ±0.5-unit per-glyph rounding. That
+    # accumulates and shifts line-break positions in browser rendering even
+    # though absolute widths look identical. --match-upm rescales the entire
+    # design font (outlines, kerning, etc.) to the source's UPM first, so
+    # incoming metric values land on integer units exactly.
+    #
+    # CAVEAT: fontTools' scale_upem has been observed to produce fonts that
+    # Chromium/OTS rejects when *upscaling* certain CJK fonts (notably
+    # NotoSansKR). We therefore only auto-rescale on the safe direction
+    # (downscale: design UPM > source UPM). For the other direction we
+    # warn and skip the rescale; the resulting font is valid but per-glyph
+    # values land on rounded integers and line breaks may drift slightly.
+    upm_rescaled_from = None
+    upm_rescale_skipped = False
+    if match_upm:
+        src_upm = metrics.global_metrics.unitsPerEm
+        dst_upm = font["head"].unitsPerEm
+        if dst_upm > src_upm:
+            from fontTools.ttLib.scaleUpem import scale_upem
+            upm_rescaled_from = dst_upm
+            scale_upem(font, src_upm)
+        elif dst_upm < src_upm:
+            upm_rescale_skipped = True
+            click.echo(
+                f"warning: --match-upm skipped: design upm ({dst_upm}) < "
+                f"source upm ({src_upm}); upscaling triggers a known "
+                f"fontTools/Chromium incompatibility for some CJK fonts. "
+                f"Per-glyph rounding to {dst_upm} units will apply.",
+                err=True,
+            )
+
     id_to_name = _build_id_to_design_name(font, metrics.glyphs.keys())
     stats: dict[str, Any] = {
         "designFont": str(design_font_path),
@@ -292,6 +325,8 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
         "applyCategories": sorted(apply_set),
         "scaleGlyph": scale_glyph,
         "missingGlyph": missing_glyph,
+        "upmRescaledFrom": upm_rescaled_from,
+        "upmRescaleSkipped": upm_rescale_skipped,
     }
 
     if "global" in apply_set:
@@ -342,6 +377,10 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
               help="How to align glyph outline to new advance width.")
 @click.option("--missing-glyph", type=click.Choice(MISSING_MODES),
               default="skip", show_default=True)
+@click.option("--match-upm/--no-match-upm", default=False, show_default=True,
+              help="Rescale the design font's UPM to match the source's "
+                   "before applying metrics. Eliminates per-glyph rounding "
+                   "that otherwise shifts line breaks when UPMs differ.")
 @click.option("--family-name", default=None)
 @click.option("--style-name", default=None)
 @click.option("--license-text", default=None,
@@ -350,6 +389,7 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
               help="License URL for the name table (ID 14).")
 def generate_cmd(metrics_path: Path, design_path: Path, output_path: Path,
                  apply: str, scale_glyph: str, missing_glyph: str,
+                 match_upm: bool,
                  family_name: str | None, style_name: str | None,
                  license_text: str | None, license_url: str | None) -> None:
     spec = MetricsSpec.from_json(metrics_path.read_text(encoding="utf-8"))
@@ -359,12 +399,16 @@ def generate_cmd(metrics_path: Path, design_path: Path, output_path: Path,
         apply=apply_set,
         scale_glyph=scale_glyph,
         missing_glyph=missing_glyph,
+        match_upm=match_upm,
         family_name=family_name,
         style_name=style_name,
         license_text=license_text,
         license_url=license_url,
     )
     adv = stats.get("advance", {})
+    extra = ""
+    if stats.get("upmRescaledFrom"):
+        extra = f", upm rescaled {stats['upmRescaledFrom']}->{spec.global_metrics.unitsPerEm}"
     click.echo(f"wrote {output_path}: applied={adv.get('applied', 0)}, "
                f"missing={adv.get('missing', 0)}, "
-               f"scaled={adv.get('scaled', 0)}", err=True)
+               f"scaled={adv.get('scaled', 0)}{extra}", err=True)

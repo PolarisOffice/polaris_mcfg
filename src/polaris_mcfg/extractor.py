@@ -48,6 +48,13 @@ OS2_FIELDS = (
     "usWinAscent", "usWinDescent",
     "sxHeight", "sCapHeight",
     "sFamilyClass", "fsSelection",
+    # Script-coverage bits. Browsers consult these (along with ``cmap``) to
+    # decide whether the font is suitable for a given lang/script and to
+    # apply per-script text spacing (e.g., Korean inter-character spacing
+    # when ``lang="ko"`` is set). When they disagree with the source font
+    # the result diverges from the reference at the layout level.
+    "ulUnicodeRange1", "ulUnicodeRange2", "ulUnicodeRange3", "ulUnicodeRange4",
+    "ulCodePageRange1", "ulCodePageRange2",
 )
 POST_FIELDS = ("italicAngle", "underlinePosition", "underlineThickness",
                "isFixedPitch")
