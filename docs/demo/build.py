@@ -67,7 +67,7 @@ def _demo_chars() -> set[int]:
         # introspect those reliably, so include the worst-case Korean/Latin
         # extras here.
         "다람쥐 헌 쳇바퀴에 타고파.",
-        "한컴 폰트 메트릭 호환성 (compat) 검증 — 2026.",
+        "소스 폰트 메트릭 호환성 (compat) 검증 — 2026.",
         "0123456789  ,.:;!?'\"()[]{}<>+=−×÷",
         "한 글  English  0123",
         "한글 사이 영문 mixed text 입니다",

@@ -2,6 +2,37 @@
 
 All notable changes to Polaris MCFG.
 
+## [0.2.3] — 2026-04-27 — generalize source-font terminology
+
+The "Hancom font" framing was always meant as one motivating example;
+the tool itself accepts any source font (corporate, commercial, third
+party). Documentation now reflects that — Hancom is mentioned as an
+example alongside corporate/commercial fonts rather than as the
+exclusive use case.
+
+### Changed
+- `Requirements.md` §1, §6 reframed around "재배포가 제한된 소스 폰트
+  (한컴 폰트, 사내 전용 폰트, 일부 상용 폰트 등)" with a one-line note
+  preserving the original Hancom motivation.
+- `README.md` intro, pipeline diagram, end-to-end example, license
+  note: "Hancom font" → "Source font".
+- `docs/index.html`, `docs/design/01-architecture.md`,
+  `docs/design/02-metrics-schema.md`, `docs/design/07-optional-metrics.md`,
+  `samples/run_demo.py` similarly generalized.
+- Demo paragraph (`samples/visual_test/build.py`,
+  `src/polaris_mcfg/render.py` default texts) and `docs/demo/index.html`
+  rebuilt with the new text.
+- Filename examples `HancomMalang.ttf` → `SourceFont-Regular.ttf` /
+  `source.metrics.json`.
+
+### Verified
+- All 84 tests still pass.
+- `docs/demo/` rebuilt: Group A 17/17 + Group B 16/16 byte-perfect
+  line-break match (line counts grew by 1 because the rephrased
+  paragraph is slightly longer; matching behavior unchanged).
+
+---
+
 ## [0.2.2] — 2026-04-27 — code review bundle
 
 Bundle of fixes from the v0.2.1 self-review. Tests 79 → 84.

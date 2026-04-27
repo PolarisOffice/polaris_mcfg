@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """End-to-end demo of the Polaris MCFG pipeline.
 
-Substitutes ``NotoSansKR-Bold.ttf`` for a "source" (a.k.a. Hancom) font and
-``NotoSansKR-Regular.ttf`` as the design font. Produces:
+Substitutes ``NotoSansKR-Bold.ttf`` as a stand-in source font (in real use
+this slot would be a license-restricted font: a Hancom font, a corporate
+font, etc.) and ``NotoSansKR-Regular.ttf`` as the design font. Produces:
 
   out/source.metrics.json   — extracted Bold metrics
   out/synthesized.ttf       — Regular outlines + Bold metrics

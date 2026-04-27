@@ -3,19 +3,21 @@
 ## 1. 배경 및 목적
 
 ### 1.1 문제 정의
-- 한컴(Hancom)이 자체 저작권 폰트를 사용하므로, 동일 디자인의 폰트를 자유 라이센스로 배포·사용할 수 없다.
+- 한컴 폰트, 사내 전용 폰트, 일부 상용 폰트 등 **재배포가 제한된 소스 폰트(이하 "소스 폰트")** 로 작성된 문서를, 자유 라이센스 환경에서 동일 레이아웃으로 재현할 수 없다.
 - 폰트별로 글리프 advance width, ascent/descent, line-gap 등 **레이아웃에 영향을 미치는 메트릭**이 다르다.
 - 그 결과, 단순히 다른 폰트로 대체하면 줄바꿈 위치, 페이지 분할, 표 크기 등이 달라져 **원본 문서와 동일한 렌더링을 기대할 수 없다**.
 
+> 본 도구의 일차 동기는 한컴 폰트류를 자유 라이센스 환경에 재현하는 사례였으나, 도구 자체는 임의의 소스 폰트를 입력으로 받는다.
+
 ### 1.2 해결 접근
-- 한컴 폰트로부터 **레이아웃에 영향을 주는 메트릭만** 추출한다 (글리프 외형 데이터는 제외).
+- 소스 폰트로부터 **레이아웃에 영향을 주는 메트릭만** 추출한다 (글리프 외형 데이터는 제외).
 - 추출된 메트릭을 **재라이센스 가능한(OFL, Apache 등) 자유 폰트의 글리프 디자인에 적용**하여,
   - **시각적 외형은 자유 폰트의 디자인**을 따르되,
-  - **레이아웃은 한컴 폰트와 호환되는** 새로운 폰트를 생성한다.
+  - **레이아웃은 소스 폰트와 호환되는** 새로운 폰트를 생성한다.
 
 ### 1.3 기대 효과
-- 한컴 폰트로 작성된 문서를 자유 라이센스 환경(웹, PDF 뷰어, 타 워드프로세서)에서 **줄바꿈/페이지 레이아웃을 유지한 채** 렌더링 가능.
-- 라이센스 위험 없이 한컴 폰트와 메트릭 호환성을 갖는 대체 폰트를 배포 가능.
+- 소스 폰트로 작성된 문서를 자유 라이센스 환경(웹, PDF 뷰어, 타 워드프로세서)에서 **줄바꿈/페이지 레이아웃을 유지한 채** 렌더링 가능.
+- 라이센스 위험 없이 소스 폰트와 메트릭 호환성을 갖는 대체 폰트를 배포 가능.
 
 ---
 
@@ -71,8 +73,8 @@
 
 #### CLI 예시
 ```
-mcfg extract HancomMalang.ttf -o malang.metrics.json
-mcfg extract HancomMalang.ttf --include-kerning --include-lsb -o malang.metrics.json
+mcfg extract SourceFont-Regular.ttf -o source.metrics.json
+mcfg extract SourceFont-Regular.ttf --include-kerning --include-lsb -o source.metrics.json
 ```
 
 ---
@@ -104,8 +106,8 @@ mcfg extract HancomMalang.ttf --include-kerning --include-lsb -o malang.metrics.
 
 #### CLI 예시
 ```
-mcfg compare HancomMalang.ttf NotoSansKR.ttf --format html -o diff.html
-mcfg compare malang.metrics.json gothic.metrics.json --format text
+mcfg compare SourceFont-Regular.ttf NotoSansKR-Regular.ttf --format html -o diff.html
+mcfg compare source.metrics.json gothic.metrics.json --format text
 ```
 
 ---
@@ -113,7 +115,7 @@ mcfg compare malang.metrics.json gothic.metrics.json --format text
 ### 3.3 폰트 생성기 (Generator)
 
 #### 입력
-- `--metrics <source.json>`: 따를 메트릭 명세 (한컴 폰트에서 추출한 것).
+- `--metrics <source.json>`: 따를 메트릭 명세 (소스 폰트에서 추출한 것).
 - `--design <target.ttf>`: 글리프 디자인을 가져올 자유 라이센스 폰트.
 - `--output <out.ttf>`: 결과 폰트 경로.
 - 옵션:
@@ -143,12 +145,12 @@ mcfg compare malang.metrics.json gothic.metrics.json --format text
 #### 라이센스/메타데이터
 - 결과 폰트의 라이센스는 **디자인 폰트의 라이센스를 기본값**으로 한다.
 - `name` 테이블의 `License Description`, `License URL`, `Copyright`, `Designer` 등을 명시적으로 설정.
-- 메트릭이 한컴 폰트에서 유래했음을 별도 메타데이터에 표기 (선택적, `--credit-source`).
+- 메트릭이 특정 소스 폰트에서 유래했음을 별도 메타데이터에 표기 (선택적, `--credit-source`).
 
 #### CLI 예시
 ```
 mcfg generate \
-  --metrics HancomMalang.metrics.json \
+  --metrics source.metrics.json \
   --design NotoSansKR-Regular.ttf \
   --apply global,advance,kerning \
   --scale-glyph fit \
@@ -189,8 +191,8 @@ mcfg generate \
 
 #### CLI 예시
 ```
-mcfg validate PolarisMalang-Regular.ttf --against HancomMalang.metrics.json
-mcfg validate PolarisMalang-Regular.ttf --against HancomMalang.ttf --tolerance 1 --render-test samples/korean.txt
+mcfg validate PolarisOutput-Regular.ttf --against source.metrics.json
+mcfg validate PolarisOutput-Regular.ttf --against SourceFont-Regular.ttf --tolerance 1 --render-test samples/korean.txt
 ```
 
 ---
@@ -202,7 +204,7 @@ mcfg validate PolarisMalang-Regular.ttf --against HancomMalang.ttf --tolerance 1
 {
   "schemaVersion": 1,
   "source": {
-    "filename": "HancomMalang.ttf",
+    "filename": "SourceFont-Regular.ttf",
     "sha256": "…",
     "extractedAt": "2026-04-27T10:00:00Z",
     "extractorVersion": "0.1.0"
@@ -272,7 +274,7 @@ mcfg validate PolarisMalang-Regular.ttf --against HancomMalang.ttf --tolerance 1
 ### 6.1 메트릭 추출의 안전성
 - 본 시스템은 **글리프 외형(outline) 데이터를 추출/복제하지 않는다**.
 - 추출되는 것은 숫자값(메트릭) 뿐이며, 이는 일반적으로 저작권 보호 대상에서 제외되는 사실 정보로 해석될 여지가 있다.
-- 그럼에도 불구하고 한컴 폰트의 EULA를 사전에 검토하고, 메트릭 추출 및 파생 사용에 대한 법적 검토를 별도로 수행할 것을 권고.
+- 그럼에도 불구하고 소스 폰트의 EULA/라이센스(예: 한컴 폰트, 사내 폰트, 상용 라이브러리)를 사전에 검토하고, 메트릭 추출 및 파생 사용에 대한 법적 검토를 별도로 수행할 것을 권고.
 
 ### 6.2 결과 폰트의 라이센스
 - 글리프 디자인의 출처가 자유 라이센스(OFL 등) 폰트이므로, 결과 폰트는 해당 라이센스의 조건을 따라야 한다.
@@ -280,7 +282,7 @@ mcfg validate PolarisMalang-Regular.ttf --against HancomMalang.ttf --tolerance 1
 
 ### 6.3 메타데이터
 - 결과 폰트의 `name` 테이블에 디자인 폰트의 원저자 표시를 보존.
-- 메트릭 호환성에 대한 별도 표기는 옵션으로 제공 (한컴 상표 사용 회피).
+- 메트릭 호환성에 대한 별도 표기는 옵션으로 제공 (소스 폰트의 상표 사용 회피).
 
 ---
 
@@ -322,5 +324,5 @@ mcfg validate PolarisMalang-Regular.ttf --against HancomMalang.ttf --tolerance 1
 - GSUB 기반 합자/변형 글리프의 메트릭 처리.
 - 컬러 폰트(`COLR`/`CPAL`, `sbix`).
 - 가변 폰트(`fvar`/`gvar`)의 축별 메트릭 보간 — v2에서 고려.
-- 한컴 폰트 자체의 글리프 외형 추출/사용 (의도적으로 영구 배제).
+- 소스 폰트의 글리프 외형 추출/사용 (의도적으로 영구 배제).
 - GUI — CLI만 제공, 추후 별도 도구로 분리 가능.

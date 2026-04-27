@@ -18,7 +18,7 @@ src/polaris_mcfg/
 ## 데이터 흐름
 
 ```
-[Hancom font.ttf]                          [Free font.ttf]
+[Source font.ttf]                          [Free font.ttf]
        │                                          │
        ▼ extract                                  │
 [metrics.json] ──────► compare ◄─────── extract ──┘

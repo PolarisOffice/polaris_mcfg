@@ -1,6 +1,6 @@
 # Polaris MCFG
 
-**Metric-Compatible Font Generator** — 한컴 폰트와 같이 라이센스가 제한된 폰트의 **레이아웃 메트릭**(advance width, ascender/descender, line gap 등)을 추출하여 자유 라이센스 폰트의 **글리프 디자인**에 결합한 새로운 폰트를 생성합니다. 원본 문서의 줄바꿈/페이지 분할은 유지하면서 라이센스 안전성을 확보합니다.
+**Metric-Compatible Font Generator** — 재배포가 제한된 폰트(상용 / 사내 / 한컴 폰트류 등 임의의 소스 폰트)의 **레이아웃 메트릭**(advance width, ascender/descender, line gap 등)을 추출하여 자유 라이센스 폰트의 **글리프 디자인**에 결합한 새로운 폰트를 생성합니다. 원본 문서의 줄바꿈/페이지 분할은 유지하면서 라이센스 안전성을 확보합니다.
 
 > 본 도구는 **글리프 외형(outline)을 추출/복제하지 않으며**, 숫자 메트릭만 다룹니다 ([라이센스 안전 경계](docs/design/02-metrics-schema.md#라이센스-안전-경계)).
 
@@ -14,7 +14,7 @@
 ## 무엇을 하는가
 
 ```
-[Hancom font.ttf]                         [Free font.ttf]
+[Source font.ttf]                         [Free font.ttf]
        │                                          │
        │ extract (메트릭만, outline 미접근)        │
        ▼                                          │
@@ -24,7 +24,7 @@
        └──────────► generate ◄──────────  [Free font.ttf]
                        │
                        ▼
-               [Polaris font.ttf]  ← 외형은 free, 레이아웃은 Hancom
+               [Polaris font.ttf]  ← 외형은 free, 레이아웃은 source와 호환
                        │
                        ▼
                    validate
@@ -58,7 +58,7 @@ mcfg --help
 ## 엔드 투 엔드 예시
 
 ```bash
-# 1. 한컴 폰트(여기서는 NotoSansKR-Bold로 대체)에서 메트릭 추출
+# 1. 소스 폰트(예시: NotoSansKR-Bold; 실제로는 한컴 폰트 등 임의의 소스)에서 메트릭 추출
 mcfg extract NotoSansKR-Bold.ttf --deterministic -o bold.json
 
 # 2. NotoSansKR-Regular의 외형 + Bold의 메트릭으로 새 폰트 생성
@@ -117,4 +117,4 @@ open diff.html
 
 - 본 도구의 코드: [MIT](LICENSE).
 - 도구가 생성한 폰트의 라이센스는 입력으로 사용한 **디자인 폰트의 라이센스**(OFL 등)를 따릅니다 — 본 도구는 메트릭 외 어떤 글리프 데이터도 만들거나 복제하지 않습니다.
-- 한컴 폰트로부터 메트릭을 추출해 사용하는 경우, 한컴 EULA의 메트릭 추출 허용 여부를 별도로 검토할 책임은 사용자에게 있습니다 (Requirements.md §6).
+- 라이센스 제한이 있는 소스 폰트(한컴 폰트, 사내/상용 폰트 등)로부터 메트릭을 추출해 사용하는 경우, 해당 폰트 EULA의 메트릭 추출 허용 여부를 별도로 검토할 책임은 사용자에게 있습니다 (Requirements.md §6).

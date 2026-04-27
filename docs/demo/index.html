@@ -21,22 +21,22 @@
 
 @font-face {
   font-family: 'OrigNoto';
-  src: url('fonts/00-NotoSansKR-Regular.woff2?cb=1777265222') format('woff2');
+  src: url('fonts/00-NotoSansKR-Regular.woff2?cb=1777276753') format('woff2');
   font-display: block;
 }
 @font-face {
   font-family: 'OrigPretendard';
-  src: url('fonts/01-Pretendard-Regular.woff2?cb=1777265222') format('woff2');
+  src: url('fonts/01-Pretendard-Regular.woff2?cb=1777276753') format('woff2');
   font-display: block;
 }
 @font-face {
   font-family: 'PolarisNPM';
-  src: url('fonts/02-Polaris-NPM-Regular.woff2?cb=1777265222') format('woff2');
+  src: url('fonts/02-Polaris-NPM-Regular.woff2?cb=1777276753') format('woff2');
   font-display: block;
 }
 @font-face {
   font-family: 'PolarisPNM';
-  src: url('fonts/03-Polaris-PNM-Regular.woff2?cb=1777265222') format('woff2');
+  src: url('fonts/03-Polaris-PNM-Regular.woff2?cb=1777276753') format('woff2');
   font-display: block;
 }
 
@@ -203,10 +203,10 @@ table.numbers td:first-child, table.numbers th:first-child { text-align: left; }
 <div class="sample f-pretendard"><span class="label">Pretendard (orig)</span>The quick brown fox jumps over the lazy dog.</div>
 <div class="sample f-npm"><span class="label">Polaris NPM</span>The quick brown fox jumps over the lazy dog.</div>
 <h3>Mixed script</h3>
-<div class="sample f-noto"><span class="label">Noto (orig)</span>한컴 폰트 메트릭 호환성 (compat) 검증 — 2026.</div>
-<div class="sample f-pnm"><span class="label">Polaris PNM</span>한컴 폰트 메트릭 호환성 (compat) 검증 — 2026.</div>
-<div class="sample f-pretendard"><span class="label">Pretendard (orig)</span>한컴 폰트 메트릭 호환성 (compat) 검증 — 2026.</div>
-<div class="sample f-npm"><span class="label">Polaris NPM</span>한컴 폰트 메트릭 호환성 (compat) 검증 — 2026.</div>
+<div class="sample f-noto"><span class="label">Noto (orig)</span>소스 폰트 메트릭 호환성 (compat) 검증 — 2026.</div>
+<div class="sample f-pnm"><span class="label">Polaris PNM</span>소스 폰트 메트릭 호환성 (compat) 검증 — 2026.</div>
+<div class="sample f-pretendard"><span class="label">Pretendard (orig)</span>소스 폰트 메트릭 호환성 (compat) 검증 — 2026.</div>
+<div class="sample f-npm"><span class="label">Polaris NPM</span>소스 폰트 메트릭 호환성 (compat) 검증 — 2026.</div>
 <h3>Numerals + punct</h3>
 <div class="sample f-noto"><span class="label">Noto (orig)</span>0123456789  ,.:;!?'"()[]{}<>+=−×÷</div>
 <div class="sample f-pnm"><span class="label">Polaris PNM</span>0123456789  ,.:;!?'"()[]{}<>+=−×÷</div>
@@ -232,11 +232,11 @@ table.numbers td:first-child, table.numbers th:first-child { text-align: left; }
   <div class="linebreak-grid metric-a">
     <div class="col">
       <h3>NotoSansKR (원본)</h3>
-      <p class="f-noto" lang="ko">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+      <p class="f-noto" lang="ko">재배포가 제한된 폰트(상용·사내·한컴 폰트류 등)를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 소스 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 소스 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
     </div>
     <div class="col">
       <h3>Polaris PNM <span class="muted">(Pretendard outline + Noto metrics)</span></h3>
-      <p class="f-pnm" lang="ko">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+      <p class="f-pnm" lang="ko">재배포가 제한된 폰트(상용·사내·한컴 폰트류 등)를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 소스 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 소스 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
     </div>
   </div>
   <p class="note">↑ 두 컬럼의 줄바꿈 위치가 같아야 정상. 글자의 굵기/형태는 달라도 됨.</p>
@@ -245,11 +245,11 @@ table.numbers td:first-child, table.numbers th:first-child { text-align: left; }
   <div class="linebreak-grid metric-b">
     <div class="col">
       <h3>Pretendard (원본)</h3>
-      <p class="f-pretendard" lang="ko">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+      <p class="f-pretendard" lang="ko">재배포가 제한된 폰트(상용·사내·한컴 폰트류 등)를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 소스 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 소스 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
     </div>
     <div class="col">
       <h3>Polaris NPM <span class="muted">(Noto outline + Pretendard metrics)</span></h3>
-      <p class="f-npm" lang="ko">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+      <p class="f-npm" lang="ko">재배포가 제한된 폰트(상용·사내·한컴 폰트류 등)를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 소스 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 소스 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
     </div>
   </div>
   <p class="note">↑ 마찬가지로, 두 컬럼의 줄바꿈 위치가 같아야 정상.</p>
@@ -337,19 +337,19 @@ table.numbers td:first-child, table.numbers th:first-child { text-align: left; }
   <div class="four-col">
     <div class="col" style="border-top-color: var(--metric-a);">
       <h3 style="color: var(--metric-a);">Noto (orig)</h3>
-      <p class="f-noto">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+      <p class="f-noto">재배포가 제한된 폰트(상용·사내·한컴 폰트류 등)를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 소스 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 소스 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
     </div>
     <div class="col" style="border-top-color: var(--metric-a);">
       <h3 style="color: var(--metric-a);">Polaris PNM</h3>
-      <p class="f-pnm">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+      <p class="f-pnm">재배포가 제한된 폰트(상용·사내·한컴 폰트류 등)를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 소스 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 소스 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
     </div>
     <div class="col" style="border-top-color: var(--metric-b);">
       <h3 style="color: var(--metric-b);">Pretendard (orig)</h3>
-      <p class="f-pretendard">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+      <p class="f-pretendard">재배포가 제한된 폰트(상용·사내·한컴 폰트류 등)를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 소스 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 소스 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
     </div>
     <div class="col" style="border-top-color: var(--metric-b);">
       <h3 style="color: var(--metric-b);">Polaris NPM</h3>
-      <p class="f-npm">한컴이 저작권 있는 폰트를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 한컴 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 한컴 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
+      <p class="f-npm">재배포가 제한된 폰트(상용·사내·한컴 폰트류 등)를 사용하는데, 문제는 폰트별로 다른 메트릭 때문에 동일한 렌더링을 기대할 수가 없다. Polaris MCFG는 소스 폰트로부터 레이아웃에 영향을 미치는 메트릭을 추출하고, 재라이센스 가능한 폰트의 디자인에 이를 결합하여 새로운 폰트를 만든다. 외형은 자유 폰트의 디자인을 따르되, 줄바꿈 위치와 페이지 분할은 원본 소스 폰트와 호환된다. 다람쥐 헌 쳇바퀴에 타고파. The quick brown fox jumps over the lazy dog. 0123456789.</p>
     </div>
   </div>
 </section>

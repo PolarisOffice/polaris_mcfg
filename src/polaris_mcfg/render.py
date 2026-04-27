@@ -186,7 +186,7 @@ DEFAULT_RENDER_TEXTS = (
     "The quick brown fox jumps over the lazy dog.",
     "0123456789",
     "다람쥐 헌 쳇바퀴에 타고파.",
-    "한컴 폰트 메트릭 호환성 검증.",
+    "소스 폰트 메트릭 호환성 검증.",
     "Polaris MCFG: Metric-Compatible Font Generator.",
     "한글 + English + 123 + ,.;:'\"!?",
 )

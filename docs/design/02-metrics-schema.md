@@ -10,7 +10,7 @@
 {
   "schemaVersion": 1,
   "source": {
-    "filename": "HancomMalang.ttf",
+    "filename": "SourceFont-Regular.ttf",
     "sha256": "<hex64>",
     "extractedAt": "2026-04-27T10:00:00Z",  // 또는 "1970-01-01T00:00:00Z" (--deterministic)
     "extractorVersion": "0.1.0"
