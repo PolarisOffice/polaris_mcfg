@@ -20,9 +20,10 @@ from fontTools.ttLib import TTFont, newTable
 from .schema import MetricsSpec, parse_id
 
 #: Categories acceptable for ``--apply``.
-APPLY_CATEGORIES = ("global", "advance", "lsb", "kerning", "vertical")
+APPLY_CATEGORIES = ("global", "advance", "lsb", "kerning", "vertical", "gsub")
 SCALE_MODES = ("none", "fit", "center")
 MISSING_MODES = ("skip", "notdef")
+OUTPUT_FORMATS = ("auto", "ttf", "woff2")
 
 
 # ---------- helpers ----------
@@ -99,8 +100,17 @@ def _apply_advance_and_lsb(font: TTFont, metrics: MetricsSpec,
 
     notdef_advance: int | None = None
     if missing_mode == "notdef" and ".notdef" in hmtx.metrics:
-        # Use whatever the design font's .notdef advance is for missing glyphs.
-        notdef_advance = hmtx.metrics[".notdef"][0]
+        # Align design font's .notdef advance with the source's, so glyphs
+        # that fall back to .notdef occupy the same horizontal slot the
+        # source font would have used. The source spec exposes .notdef
+        # under the ``glyph#.notdef`` identifier (it has no codepoint).
+        src_notdef = metrics.glyphs.get("glyph#.notdef")
+        if src_notdef is not None:
+            notdef_advance = _scaled(src_notdef.advanceWidth, src_upm, dst_upm)
+            old_lsb = hmtx.metrics[".notdef"][1]
+            hmtx.metrics[".notdef"] = (notdef_advance, old_lsb)
+        else:
+            notdef_advance = hmtx.metrics[".notdef"][0]
 
     for gid, gm in metrics.glyphs.items():
         gname = id_to_name.get(gid)
@@ -147,10 +157,20 @@ def _apply_advance_and_lsb(font: TTFont, metrics: MetricsSpec,
 
 def _apply_kerning(font: TTFont, metrics: MetricsSpec,
                    id_to_name: dict[str, str | None]) -> dict[str, Any]:
+    """Apply kerning to both classic ``kern`` and the GPOS ``kern`` feature.
+
+    Browsers and modern shapers prefer GPOS over the classic ``kern`` table
+    for OpenType fonts, so writing only ``kern`` (as v1 did) was effectively
+    invisible to most renderers when the design font already had a GPOS
+    ``kern`` feature. We now:
+
+    1. Write a classic ``kern`` table for legacy shapers.
+    2. Replace the design font's GPOS pair-positioning lookups with a new
+       lookup containing the source pairs, and rewire the ``kern`` feature
+       to point at it. Other GPOS lookups (mark, cursive, etc.) are kept.
+    """
     if not metrics.kerning:
         return {"pairs": 0, "skipped": 0}
-
-    from fontTools.ttLib.tables._k_e_r_n import KernTable_format_0
 
     pairs: dict[tuple[str, str], int] = {}
     skipped = 0
@@ -162,6 +182,16 @@ def _apply_kerning(font: TTFont, metrics: MetricsSpec,
             continue
         pairs[(l, r)] = p.value
 
+    if not pairs:
+        return {"pairs": 0, "skipped": skipped}
+
+    _write_classic_kern(font, pairs)
+    _write_gpos_kern(font, pairs)
+    return {"pairs": len(pairs), "skipped": skipped}
+
+
+def _write_classic_kern(font: TTFont, pairs: dict[tuple[str, str], int]) -> None:
+    from fontTools.ttLib.tables._k_e_r_n import KernTable_format_0
     kern = newTable("kern")
     kern.version = 0
     sub = KernTable_format_0()
@@ -169,10 +199,249 @@ def _apply_kerning(font: TTFont, metrics: MetricsSpec,
     sub.coverage = 1
     sub.version = 0
     sub.format = 0
-    sub.kernTable = pairs
+    sub.kernTable = dict(pairs)
     kern.kernTables = [sub]
     font["kern"] = kern
-    return {"pairs": len(pairs), "skipped": skipped}
+
+
+def _write_gpos_kern(font: TTFont, pairs: dict[tuple[str, str], int]) -> None:
+    """Inject a GPOS PairPos lookup, replacing existing pair-pos lookups.
+
+    Existing non-pair lookups (mark, cursive, contextual, ...) are preserved.
+    The ``kern`` feature record is rewired to reference our new lookup; if
+    the design font has no ``kern`` feature, one is added across all scripts
+    that already exist in GPOS.
+    """
+    from fontTools.otlLib import builder as otl
+    from fontTools.ttLib.tables import otTables as ot
+    from fontTools.ttLib.tables.otBase import ValueRecord
+
+    glyph_order = font.getGlyphOrder()
+    glyph_map = {g: i for i, g in enumerate(glyph_order)}
+    valid = {(l, r): adj for (l, r), adj in pairs.items()
+             if l in glyph_map and r in glyph_map and adj != 0}
+    if not valid:
+        return
+
+    pair_records: dict[tuple[str, str], tuple[ValueRecord, ValueRecord]] = {}
+    for (l, r), adj in valid.items():
+        v1 = ValueRecord()
+        v1.XAdvance = int(adj)
+        v2 = ValueRecord()
+        pair_records[(l, r)] = (v1, v2)
+
+    subtables = otl.buildPairPosGlyphs(pair_records, glyph_map)
+
+    kern_lookup = ot.Lookup()
+    kern_lookup.LookupType = 2
+    kern_lookup.LookupFlag = 0
+    kern_lookup.SubTable = subtables
+    kern_lookup.SubTableCount = len(subtables)
+
+    if "GPOS" not in font:
+        font["GPOS"] = _build_minimal_gpos(kern_lookup)
+        return
+
+    gpos = font["GPOS"].table
+
+    # Filter out existing pair-positioning lookups (and Extension wrappers
+    # around them); remap surviving lookup indices.
+    new_lookups: list = []
+    old_to_new: dict[int, int] = {}
+    for old_idx, lk in enumerate(gpos.LookupList.Lookup):
+        if _lookup_is_pair_pos(lk):
+            continue
+        old_to_new[old_idx] = len(new_lookups)
+        new_lookups.append(lk)
+    new_kern_idx = len(new_lookups)
+    new_lookups.append(kern_lookup)
+
+    gpos.LookupList.Lookup = new_lookups
+    gpos.LookupList.LookupCount = len(new_lookups)
+
+    # Update FeatureList lookup indices and rewire the ``kern`` feature.
+    has_kern = False
+    for fr in gpos.FeatureList.FeatureRecord:
+        old_idxs = list(fr.Feature.LookupListIndex)
+        kept = [old_to_new[i] for i in old_idxs if i in old_to_new]
+        if fr.FeatureTag == "kern":
+            kept = [i for i in kept if i != new_kern_idx]
+            kept.append(new_kern_idx)
+            has_kern = True
+        fr.Feature.LookupListIndex = kept
+        fr.Feature.LookupCount = len(kept)
+
+    if not has_kern:
+        feat = ot.Feature()
+        feat.LookupListIndex = [new_kern_idx]
+        feat.LookupCount = 1
+        feat.FeatureParams = None
+        fr = ot.FeatureRecord()
+        fr.FeatureTag = "kern"
+        fr.Feature = feat
+        new_feat_idx = len(gpos.FeatureList.FeatureRecord)
+        gpos.FeatureList.FeatureRecord.append(fr)
+        gpos.FeatureList.FeatureCount = len(gpos.FeatureList.FeatureRecord)
+        for sr in gpos.ScriptList.ScriptRecord:
+            for ls in [sr.Script.DefaultLangSys] + [
+                lsr.LangSys for lsr in sr.Script.LangSysRecord
+            ]:
+                if ls is None:
+                    continue
+                ls.FeatureIndex.append(new_feat_idx)
+                ls.FeatureCount = len(ls.FeatureIndex)
+
+
+def _lookup_is_pair_pos(lookup) -> bool:
+    """True for type-2 (PairPos) lookups, including Extension wrappers."""
+    if lookup.LookupType == 2:
+        return True
+    if lookup.LookupType == 9:
+        for sub in lookup.SubTable:
+            if getattr(sub, "ExtensionLookupType", None) == 2:
+                return True
+    return False
+
+
+def _build_minimal_gpos(kern_lookup):
+    """Construct a fresh GPOS table containing only one ``kern`` lookup."""
+    from fontTools.ttLib.tables import otTables as ot
+
+    lookup_list = ot.LookupList()
+    lookup_list.Lookup = [kern_lookup]
+    lookup_list.LookupCount = 1
+
+    feat = ot.Feature()
+    feat.FeatureParams = None
+    feat.LookupListIndex = [0]
+    feat.LookupCount = 1
+    fr = ot.FeatureRecord()
+    fr.FeatureTag = "kern"
+    fr.Feature = feat
+    feat_list = ot.FeatureList()
+    feat_list.FeatureRecord = [fr]
+    feat_list.FeatureCount = 1
+
+    default_ls = ot.DefaultLangSys()
+    default_ls.LookupOrder = None
+    default_ls.ReqFeatureIndex = 0xFFFF
+    default_ls.FeatureIndex = [0]
+    default_ls.FeatureCount = 1
+    script = ot.Script()
+    script.DefaultLangSys = default_ls
+    script.LangSysRecord = []
+    script.LangSysCount = 0
+    script_record = ot.ScriptRecord()
+    script_record.ScriptTag = "DFLT"
+    script_record.Script = script
+    script_list = ot.ScriptList()
+    script_list.ScriptRecord = [script_record]
+    script_list.ScriptCount = 1
+
+    gpos = ot.GPOS()
+    gpos.Version = 0x00010000
+    gpos.ScriptList = script_list
+    gpos.FeatureList = feat_list
+    gpos.LookupList = lookup_list
+
+    tbl = newTable("GPOS")
+    tbl.table = gpos
+    return tbl
+
+
+def _apply_shaped_advances(
+    font: TTFont, metrics: MetricsSpec,
+    id_to_name: dict[str, str | None],
+    *, src_upm: int, dst_upm: int,
+) -> dict[str, Any]:
+    """Inject `--apply gsub` overrides as ``locl``-feature substitutions.
+
+    For each ``ShapedAdvanceOverride``:
+    1. Add a stub glyph (empty outline, override advance) to the design font.
+    2. Add a single GSUB substitution under the override's (script, language)
+       context, registered in the ``locl`` (Localized Forms) feature so
+       browsers auto-apply it when the matching ``lang`` attribute is set.
+
+    The stub glyph carries no outline, so the result reflects the design
+    font's other glyphs visually but the line layout under that script/lang
+    matches the source font's shaping.
+    """
+    if not metrics.shaped_advances:
+        return {"applied": 0, "skipped": 0}
+
+    from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
+    from fontTools.ttLib.tables._g_l_y_f import Glyph
+
+    cmap = font.getBestCmap() or {}
+    glyf = font["glyf"]
+    hmtx = font["hmtx"]
+    glyph_order = list(font.getGlyphOrder())
+
+    stubs_added: list[str] = []
+    # Dedupe: at most one substitution per (script, lang, source_glyph).
+    # Same context can yield multiple ShapedAdvanceOverride entries when
+    # the source font has overlapping GSUB lookups; FEA forbids redefining
+    # a substitution for the same input glyph in the same lang/script.
+    contexts: dict[tuple[str, str], dict[str, str]] = {}
+    skipped = 0
+
+    for ov in metrics.shaped_advances:
+        try:
+            cp = int(ov.codepoint[2:], 16)
+        except ValueError:
+            skipped += 1
+            continue
+        gn = cmap.get(cp)
+        if gn is None or gn not in glyf.glyphs:
+            skipped += 1
+            continue
+        ctx = (ov.script, ov.language)
+        if ctx in contexts and gn in contexts[ctx]:
+            # Already have a substitution for this glyph in this context;
+            # keep the first one (deterministic given sorted spec order).
+            continue
+        stub_name = f"polaris.{ov.codepoint[2:]}.{ov.script}_{ov.language}"
+        if stub_name not in glyf.glyphs:
+            stub = Glyph()
+            stub.numberOfContours = 0
+            glyf[stub_name] = stub
+            glyph_order.append(stub_name)
+            stubs_added.append(stub_name)
+            advance = _scaled(ov.advance, src_upm, dst_upm)
+            hmtx.metrics[stub_name] = (advance, 0)
+        contexts.setdefault(ctx, {})[gn] = stub_name
+
+    if not contexts:
+        return {"applied": 0, "skipped": skipped}
+
+    if stubs_added:
+        font.setGlyphOrder(glyph_order)
+        font["maxp"].numGlyphs = len(glyph_order)
+
+    # Build a FEA snippet defining a `locl` feature for each (script, lang).
+    fea_lines = ["languagesystem DFLT dflt;"]
+    for script, lang in contexts:
+        fea_lines.append(f"languagesystem {script} {lang};")
+    fea_lines.append("feature locl {")
+    for (script, lang), gn_to_stub in contexts.items():
+        fea_lines.append(f"  script {script};")
+        fea_lines.append(f"  language {lang} exclude_dflt;")
+        for original, stub in gn_to_stub.items():
+            fea_lines.append(f"  sub {original} by {stub};")
+    fea_lines.append("} locl;")
+    fea = "\n".join(fea_lines)
+
+    addOpenTypeFeaturesFromString(font, fea)
+
+    return {
+        "applied": sum(len(v) for v in contexts.values()),
+        "skipped": skipped,
+        "stubGlyphs": len(stubs_added),
+        "contexts": [f"{s}/{l}" for s, l in sorted(contexts.keys())],
+    }
+
+
+# Backward compat for the type signature change in the inline dict above.
 
 
 def _apply_vertical(font: TTFont, metrics: MetricsSpec,
@@ -267,6 +536,7 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
                   scale_glyph: str = "none",
                   missing_glyph: str = "skip",
                   match_upm: bool = False,
+                  output_format: str = "auto",
                   family_name: str | None = None,
                   style_name: str | None = None,
                   license_text: str | None = None,
@@ -279,6 +549,8 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
         raise click.UsageError(f"--scale-glyph must be one of {SCALE_MODES}")
     if missing_glyph not in MISSING_MODES:
         raise click.UsageError(f"--missing-glyph must be one of {MISSING_MODES}")
+    if output_format not in OUTPUT_FORMATS:
+        raise click.UsageError(f"--output-format must be one of {OUTPUT_FORMATS}")
 
     font = TTFont(str(design_font_path))
     if "glyf" not in font:
@@ -293,30 +565,20 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
     # design font (outlines, kerning, etc.) to the source's UPM first, so
     # incoming metric values land on integer units exactly.
     #
-    # CAVEAT: fontTools' scale_upem has been observed to produce fonts that
-    # Chromium/OTS rejects when *upscaling* certain CJK fonts (notably
-    # NotoSansKR). We therefore only auto-rescale on the safe direction
-    # (downscale: design UPM > source UPM). For the other direction we
-    # warn and skip the rescale; the resulting font is valid but per-glyph
-    # values land on rounded integers and line breaks may drift slightly.
+    # KNOWN ISSUE: scale_upem applied to NotoSansKR (and likely other large
+    # CJK fonts) produces TTFs that Chromium's TTF sanitizer rejects, even
+    # though fontTools/HarfBuzz consider them valid and the same data
+    # serialized as WOFF2 loads fine. We therefore allow upscale here and
+    # surface the workaround at the output-format layer below
+    # (output_format='auto' switches to WOFF2 when rescale was performed).
     upm_rescaled_from = None
-    upm_rescale_skipped = False
     if match_upm:
         src_upm = metrics.global_metrics.unitsPerEm
         dst_upm = font["head"].unitsPerEm
-        if dst_upm > src_upm:
+        if dst_upm != src_upm:
             from fontTools.ttLib.scaleUpem import scale_upem
             upm_rescaled_from = dst_upm
             scale_upem(font, src_upm)
-        elif dst_upm < src_upm:
-            upm_rescale_skipped = True
-            click.echo(
-                f"warning: --match-upm skipped: design upm ({dst_upm}) < "
-                f"source upm ({src_upm}); upscaling triggers a known "
-                f"fontTools/Chromium incompatibility for some CJK fonts. "
-                f"Per-glyph rounding to {dst_upm} units will apply.",
-                err=True,
-            )
 
     id_to_name = _build_id_to_design_name(font, metrics.glyphs.keys())
     stats: dict[str, Any] = {
@@ -326,7 +588,6 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
         "scaleGlyph": scale_glyph,
         "missingGlyph": missing_glyph,
         "upmRescaledFrom": upm_rescaled_from,
-        "upmRescaleSkipped": upm_rescale_skipped,
     }
 
     if "global" in apply_set:
@@ -346,15 +607,46 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
     if "vertical" in apply_set:
         stats["vertical"] = _apply_vertical(font, metrics, id_to_name)
 
+    if "gsub" in apply_set:
+        src_upm_for_gsub = metrics.global_metrics.unitsPerEm
+        dst_upm_for_gsub = font["head"].unitsPerEm
+        stats["gsub"] = _apply_shaped_advances(
+            font, metrics, id_to_name,
+            src_upm=src_upm_for_gsub, dst_upm=dst_upm_for_gsub,
+        )
+
     if family_name or style_name or license_text or license_url:
         _update_name_table(font, family_name=family_name, style_name=style_name,
                            license_text=license_text, license_url=license_url)
 
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+
+    # Resolve output format. When fontTools' scale_upem has rescaled the
+    # design (typically the upscale path), the resulting TTF can be rejected
+    # by Chromium's TTF sanitizer even though the same bytes round-trip
+    # cleanly as WOFF2. ``output_format='auto'`` switches to WOFF2 in that
+    # case; users can force ``ttf`` or ``woff2`` explicitly.
+    chosen_format = output_format
+    if chosen_format == "auto":
+        if upm_rescaled_from is not None:
+            chosen_format = "woff2"
+        else:
+            chosen_format = "ttf"
+
+    if chosen_format == "woff2":
+        font.flavor = "woff2"
+        if out.suffix.lower() != ".woff2":
+            out = out.with_suffix(".woff2")
+    else:
+        font.flavor = None
+        if out.suffix.lower() not in (".ttf", ".otf"):
+            out = out.with_suffix(".ttf")
+
     font.save(str(out))
     font.close()
     stats["output"] = str(out)
+    stats["outputFormat"] = chosen_format
     return stats
 
 
@@ -381,6 +673,11 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
               help="Rescale the design font's UPM to match the source's "
                    "before applying metrics. Eliminates per-glyph rounding "
                    "that otherwise shifts line breaks when UPMs differ.")
+@click.option("--output-format", type=click.Choice(OUTPUT_FORMATS),
+              default="auto", show_default=True,
+              help="Output container. ``auto`` picks WOFF2 when --match-upm "
+                   "rescaled the design font (Chromium TTF sanitizer "
+                   "incompatibility workaround) and TTF otherwise.")
 @click.option("--family-name", default=None)
 @click.option("--style-name", default=None)
 @click.option("--license-text", default=None,
@@ -389,7 +686,7 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
               help="License URL for the name table (ID 14).")
 def generate_cmd(metrics_path: Path, design_path: Path, output_path: Path,
                  apply: str, scale_glyph: str, missing_glyph: str,
-                 match_upm: bool,
+                 match_upm: bool, output_format: str,
                  family_name: str | None, style_name: str | None,
                  license_text: str | None, license_url: str | None) -> None:
     spec = MetricsSpec.from_json(metrics_path.read_text(encoding="utf-8"))
@@ -400,15 +697,16 @@ def generate_cmd(metrics_path: Path, design_path: Path, output_path: Path,
         scale_glyph=scale_glyph,
         missing_glyph=missing_glyph,
         match_upm=match_upm,
+        output_format=output_format,
         family_name=family_name,
         style_name=style_name,
         license_text=license_text,
         license_url=license_url,
     )
     adv = stats.get("advance", {})
-    extra = ""
+    extra = f" [{stats.get('outputFormat', 'ttf')}]"
     if stats.get("upmRescaledFrom"):
-        extra = f", upm rescaled {stats['upmRescaledFrom']}->{spec.global_metrics.unitsPerEm}"
-    click.echo(f"wrote {output_path}: applied={adv.get('applied', 0)}, "
+        extra += f", upm rescaled {stats['upmRescaledFrom']}->{spec.global_metrics.unitsPerEm}"
+    click.echo(f"wrote {stats['output']}: applied={adv.get('applied', 0)}, "
                f"missing={adv.get('missing', 0)}, "
                f"scaled={adv.get('scaled', 0)}{extra}", err=True)

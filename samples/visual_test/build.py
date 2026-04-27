@@ -79,36 +79,65 @@ def main() -> int:
           f"descent={pret_spec.global_metrics.hhea['descent']}")
 
     print("[3/4] generating cross-pollinated fonts ...")
+    # Re-extract source metrics with all the features that the generator
+    # will apply: kerning (P0/A1) and shape-induced advance overrides
+    # (v2/A3). include_gsub probes shaping under common (script, lang)
+    # combinations and is slower than the other extractors.
+    print("      (also extracting GPOS kern + GSUB shape overrides — slower)")
+    pret_spec_full = extract_metrics(PRET, include_kerning=True,
+                                      include_gsub=True, deterministic=True)
+    noto_spec_full = extract_metrics(NOTO, include_kerning=True,
+                                      include_gsub=True, deterministic=True)
+
     # match_upm=True rescales the design font to the source's UPM before
     # applying metrics — required for byte-perfect advance widths and so
     # line-break positions match exactly across the metric pair.
+    # output_format="auto" picks WOFF2 when --match-upm rescaled the font
+    # (Chromium TTF sanitizer rejects scale_upem'd CJK TTFs).
+    # apply=gsub injects locl substitutions so lang="ko" rendering also
+    # matches the source font's shaped widths.
     s1 = generate_font(
-        pret_spec, NOTO, polaris_npm,
-        apply=("global", "advance"),
+        pret_spec_full, NOTO, polaris_npm,
+        apply=("global", "advance", "kerning", "gsub"),
         match_upm=True,
+        output_format="auto",
         family_name="Polaris NPM",  # Noto outline, Pretendard Metrics
         style_name="Regular",
         license_text="SIL Open Font License 1.1 (see source font)",
     )
     s2 = generate_font(
-        noto_spec, PRET, polaris_pnm,
-        apply=("global", "advance"),
+        noto_spec_full, PRET, polaris_pnm,
+        apply=("global", "advance", "kerning", "gsub"),
         match_upm=True,
+        output_format="auto",
         family_name="Polaris PNM",  # Pretendard outline, Noto Metrics
         style_name="Regular",
         license_text="SIL Open Font License 1.1 (see source font)",
     )
     print(f"      -> {polaris_npm.name}: applied={s1['advance']['applied']}, "
-          f"missing={s1['advance']['missing']}")
+          f"missing={s1['advance']['missing']}, "
+          f"format={s1.get('outputFormat', 'ttf')}, "
+          f"gsub={s1.get('gsub', {}).get('applied', 0)}")
     print(f"      -> {polaris_pnm.name}: applied={s2['advance']['applied']}, "
-          f"missing={s2['advance']['missing']}")
+          f"missing={s2['advance']['missing']}, "
+          f"format={s2.get('outputFormat', 'ttf')}, "
+          f"gsub={s2.get('gsub', {}).get('applied', 0)}")
 
     print("[4/4] writing index.html ...")
     import time
     cache_buster = str(int(time.time()))
-    (OUT / "index.html").write_text(_render_html(cache_buster=cache_buster),
-                                    encoding="utf-8")
+    # The actual files emitted by generate_font (their suffix may be .woff2
+    # if --match-upm rescaled the design font). Use the stats output_format
+    # to pick the right URL in the @font-face.
+    npm_format = s1.get("outputFormat", "ttf")
+    pnm_format = s2.get("outputFormat", "ttf")
+    (OUT / "index.html").write_text(
+        _render_html(cache_buster=cache_buster,
+                     npm_format=npm_format, pnm_format=pnm_format),
+        encoding="utf-8",
+    )
     print(f"      -> {OUT / 'index.html'}  (cache-buster={cache_buster})")
+    print(f"      formats: NPM={npm_format}, PNM={pnm_format}")
 
     print()
     print("Done. To view:")
@@ -147,8 +176,16 @@ _TABLE_NUMBERS = [
 ]
 
 
-def _render_html(*, cache_buster: str = "0") -> str:
-    css = _CSS.replace("__CB__", cache_buster)
+def _render_html(*, cache_buster: str = "0",
+                 npm_format: str = "ttf", pnm_format: str = "ttf") -> str:
+    npm_ext = "woff2" if npm_format == "woff2" else "ttf"
+    pnm_ext = "woff2" if pnm_format == "woff2" else "ttf"
+    css = (_CSS
+           .replace("__CB__", cache_buster)
+           .replace("__NPM_EXT__", npm_ext)
+           .replace("__NPM_FMT__", "woff2" if npm_ext == "woff2" else "truetype")
+           .replace("__PNM_EXT__", pnm_ext)
+           .replace("__PNM_FMT__", "woff2" if pnm_ext == "woff2" else "truetype"))
     legend = _LEGEND_HTML
     sec1 = _section_single_lines()
     sec2 = _section_line_break_pairs()
@@ -225,12 +262,12 @@ _CSS = """
 }
 @font-face {
   font-family: 'PolarisNPM';
-  src: url('fonts/02-Polaris-NotoOutline-PretendardMetrics.ttf?cb=__CB__') format('truetype');
+  src: url('fonts/02-Polaris-NotoOutline-PretendardMetrics.__NPM_EXT__?cb=__CB__') format('__NPM_FMT__');
   font-display: block;
 }
 @font-face {
   font-family: 'PolarisPNM';
-  src: url('fonts/03-Polaris-PretendardOutline-NotoMetrics.ttf?cb=__CB__') format('truetype');
+  src: url('fonts/03-Polaris-PretendardOutline-NotoMetrics.__PNM_EXT__?cb=__CB__') format('__PNM_FMT__');
   font-display: block;
 }
 
@@ -400,49 +437,42 @@ def _section_single_lines() -> str:
 
 def _section_line_break_pairs() -> str:
     p = _PARAGRAPH_KO
-    # NOTE: lang="en" intentionally bypasses the browser's Korean-script
-    # shaping (which triggers GSUB substitutions in Noto, e.g., wider
-    # ideographic space). With lang="en" the shaper uses raw cmap+hmtx,
-    # which is what MCFG actually controls. The next section shows the
-    # ko-vs-en effect explicitly.
     return f"""
 <section>
   <h2>2. 라인브레이크 비교 (핵심)</h2>
   <p>같은 너비 컨테이너에 같은 텍스트. <strong>같은 메트릭 그룹의 두 폰트는
     동일한 위치에서 줄바꿈</strong>해야 합니다 — 외형이 달라도.</p>
   <p class="note">
-    Group A (Noto 메트릭, UPM=1000): Pretendard 외형을 Noto의 UPM으로
-    downscale한 뒤 메트릭 적용 — <strong>완전 일치</strong> 기대.<br>
-    Group B (Pretendard 메트릭, UPM=2048): Noto 외형을 Pretendard UPM으로
-    upscale하는 경로가 fontTools/Chromium 호환성 이슈로 비활성화되어,
-    Noto 외형(UPM=1000)에 Pretendard 메트릭을 1000 단위로 라운딩하여 적용 —
-    글리프당 ±0.5 unit 라운딩으로 긴 라인에서 1~2자 표류 가능.<br>
-    아래 컬럼은 모두 <code>lang="en"</code>으로 렌더링됩니다 (스크립트별
-    GSUB 치환을 우회 — §3 참고).
+    Group A (Noto 메트릭): Pretendard 외형을 Noto의 UPM(1000)으로
+    rescale → Noto 메트릭 적용 + GPOS 커닝 + GSUB locl 치환 이식.<br>
+    Group B (Pretendard 메트릭): Noto 외형을 Pretendard UPM(2048)으로
+    rescale → Pretendard 메트릭/커닝 적용. (rescale 결과가 Chromium TTF
+    sanitizer와 호환 안 되어 자동으로 WOFF2 컨테이너로 출력.)<br>
+    아래 컬럼은 모두 <code>lang="ko"</code>로 렌더링됩니다.
   </p>
 
-  <h3 style="margin-top: 18px;">Group A — Noto metrics (UPM 정합, 완전 일치 기대)</h3>
+  <h3 style="margin-top: 18px;">Group A — Noto metrics</h3>
   <div class="linebreak-grid metric-a">
     <div class="col">
       <h3>NotoSansKR (원본)</h3>
-      <p class="f-noto" lang="en">{p}</p>
+      <p class="f-noto" lang="ko">{p}</p>
     </div>
     <div class="col">
       <h3>Polaris PNM <span class="muted">(Pretendard outline + Noto metrics)</span></h3>
-      <p class="f-pnm" lang="en">{p}</p>
+      <p class="f-pnm" lang="ko">{p}</p>
     </div>
   </div>
   <p class="note">↑ 두 컬럼의 줄바꿈 위치가 같아야 정상. 글자의 굵기/형태는 달라도 됨.</p>
 
-  <h3 style="margin-top: 24px;">Group B — Pretendard metrics (UPM 라운딩, 약간 표류 가능)</h3>
+  <h3 style="margin-top: 24px;">Group B — Pretendard metrics</h3>
   <div class="linebreak-grid metric-b">
     <div class="col">
       <h3>Pretendard (원본)</h3>
-      <p class="f-pretendard" lang="en">{p}</p>
+      <p class="f-pretendard" lang="ko">{p}</p>
     </div>
     <div class="col">
       <h3>Polaris NPM <span class="muted">(Noto outline + Pretendard metrics)</span></h3>
-      <p class="f-npm" lang="en">{p}</p>
+      <p class="f-npm" lang="ko">{p}</p>
     </div>
   </div>
   <p class="note">↑ 마찬가지로, 두 컬럼의 줄바꿈 위치가 같아야 정상.</p>

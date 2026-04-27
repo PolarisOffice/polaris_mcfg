@@ -21,10 +21,21 @@ from .schema import (
     GlyphMetric,
     KerningPair,
     MetricsSpec,
+    ShapedAdvanceOverride,
     VerticalGlyphMetric,
     VerticalMetrics,
     codepoint_to_id,
     glyphname_to_id,
+)
+
+#: Default (script, language) tuples probed for shape-induced advance
+#: differences. Extend as needed; keeping this list short keeps extraction
+#: snappy on huge CJK fonts (one shape call per (codepoint, context)).
+DEFAULT_SHAPING_CONTEXTS = (
+    ("hang", "KOR"),  # Korean
+    ("hani", "ZHS"),  # Simplified Chinese
+    ("hani", "ZHT"),  # Traditional Chinese
+    ("kana", "JAN"),  # Japanese
 )
 
 #: Tables the extractor is permitted to load. Every other table — notably
@@ -33,8 +44,13 @@ from .schema import (
 ALLOWED_TABLES = frozenset({
     "head", "hhea", "OS/2", "post", "hmtx", "cmap",
     "kern", "vhea", "vmtx",
-    # GPOS would unlock advanced kerning extraction but is deferred to a later
-    # milestone — the classic ``kern`` table is sufficient for v1.
+    # GPOS for pair-positioning (kerning) extraction. We only read PairPos
+    # subtables (lookup type 2); other lookups (mark/cursive/context) are
+    # ignored. This is still purely numeric data, not outline data.
+    "GPOS",
+    # GSUB is read only when ``include_gsub=True`` is requested. Substitution
+    # data is structural / lookup-table information, not glyph outlines.
+    "GSUB",
 })
 
 HEAD_FIELDS = ("unitsPerEm", "xMin", "yMin", "xMax", "yMax", "macStyle", "flags")
@@ -92,7 +108,7 @@ def _build_glyph_id_map(font: TTFont) -> dict[str, str]:
     }
 
 
-def _extract_kerning(font: TTFont, id_of: dict[str, str]) -> list[KerningPair]:
+def _extract_classic_kern(font: TTFont, id_of: dict[str, str]) -> list[KerningPair]:
     pairs: list[KerningPair] = []
     if "kern" not in font:
         return pairs
@@ -111,6 +127,127 @@ def _extract_kerning(font: TTFont, id_of: dict[str, str]) -> list[KerningPair]:
     return pairs
 
 
+def _invert_classdef(classdef, universe: set[str]) -> dict[int, list[str]]:
+    """Invert ``ClassDef`` into ``{class_index: [glyph_names]}``.
+
+    Class 0 is the implicit "everything not in another class" bucket — it
+    must be populated from the caller-provided universe.
+    """
+    out: dict[int, list[str]] = {0: []}
+    explicit: set[str] = set()
+    for g, c in classdef.classDefs.items():
+        out.setdefault(c, []).append(g)
+        explicit.add(g)
+    out[0].extend(g for g in universe if g not in explicit)
+    return out
+
+
+def _resolve_extension(subtable):
+    """Unwrap a Lookup type 9 (Extension Positioning) subtable."""
+    if hasattr(subtable, "ExtSubTable"):
+        return subtable.ExtSubTable, subtable.ExtensionLookupType
+    return subtable, None
+
+
+def _extract_gpos_pairs(font: TTFont, id_of: dict[str, str]) -> list[KerningPair]:
+    """Extract GPOS lookup type 2 (PairPos) Format 1 + 2 as KerningPairs.
+
+    Mark/cursive/context lookups are ignored. Only the X-advance adjustment of
+    Value1 is read; complex value records (XPlacement, YAdvance, YPlacement)
+    don't survive the lossy conversion to a plain pair list.
+    """
+    out: list[KerningPair] = []
+    if "GPOS" not in font:
+        return out
+    table = font["GPOS"].table
+    if not table or not getattr(table, "LookupList", None):
+        return out
+    glyph_universe = set(font.getGlyphOrder())
+    seen: dict[tuple[str, str], int] = {}
+
+    for lookup in table.LookupList.Lookup:
+        # Lookup may be wrapped in Extension (type 9). Resolve.
+        for raw in lookup.SubTable:
+            sub, ext_type = _resolve_extension(raw)
+            effective_type = ext_type if ext_type is not None else lookup.LookupType
+            if effective_type != 2:
+                continue
+            fmt = getattr(sub, "Format", None)
+            if fmt == 1:
+                _harvest_pairpos1(sub, id_of, seen)
+            elif fmt == 2:
+                _harvest_pairpos2(sub, glyph_universe, id_of, seen)
+
+    for (l, r), v in seen.items():
+        out.append(KerningPair(left=l, right=r, value=v))
+    return out
+
+
+def _value_x_advance(value_record) -> int:
+    if value_record is None:
+        return 0
+    v = getattr(value_record, "XAdvance", 0)
+    return int(v) if v is not None else 0
+
+
+def _harvest_pairpos1(sub, id_of: dict[str, str],
+                      seen: dict[tuple[str, str], int]) -> None:
+    coverage = sub.Coverage.glyphs
+    for first_idx, pair_set in enumerate(sub.PairSet):
+        g1 = coverage[first_idx]
+        if g1 not in id_of:
+            continue
+        for pvr in pair_set.PairValueRecord:
+            g2 = pvr.SecondGlyph
+            if g2 not in id_of:
+                continue
+            adj = _value_x_advance(pvr.Value1)
+            if adj == 0:
+                continue
+            seen.setdefault((id_of[g1], id_of[g2]), adj)
+
+
+def _harvest_pairpos2(sub, glyph_universe: set[str], id_of: dict[str, str],
+                      seen: dict[tuple[str, str], int]) -> None:
+    coverage = set(sub.Coverage.glyphs)
+    class1 = _invert_classdef(sub.ClassDef1, coverage)
+    class2 = _invert_classdef(sub.ClassDef2, glyph_universe)
+    for c1 in range(sub.Class1Count):
+        c1_record = sub.Class1Record[c1]
+        for c2 in range(sub.Class2Count):
+            rec = c1_record.Class2Record[c2]
+            adj = _value_x_advance(rec.Value1)
+            if adj == 0:
+                continue
+            for g1 in class1.get(c1, []):
+                if g1 not in id_of:
+                    continue
+                gid1 = id_of[g1]
+                for g2 in class2.get(c2, []):
+                    if g2 not in id_of:
+                        continue
+                    seen.setdefault((gid1, id_of[g2]), adj)
+
+
+def _extract_kerning(font: TTFont, id_of: dict[str, str]) -> list[KerningPair]:
+    """Combine classic ``kern`` and GPOS pair-positioning lookups.
+
+    For pairs that appear in both sources, classic ``kern`` wins (it's
+    explicit and per-glyph; GPOS class-based often produces noisier values).
+    """
+    pairs: list[KerningPair] = []
+    seen: set[tuple[str, str]] = set()
+    for p in _extract_classic_kern(font, id_of):
+        pairs.append(p)
+        seen.add((p.left, p.right))
+    for p in _extract_gpos_pairs(font, id_of):
+        if (p.left, p.right) in seen:
+            continue
+        pairs.append(p)
+        seen.add((p.left, p.right))
+    return pairs
+
+
 def _extract_vertical(font: TTFont, id_of: dict[str, str]) -> VerticalMetrics | None:
     if "vhea" not in font or "vmtx" not in font:
         return None
@@ -125,12 +262,66 @@ def _extract_vertical(font: TTFont, id_of: dict[str, str]) -> VerticalMetrics | 
     return VerticalMetrics(vhea=vhea_dict, vmtx=vmtx_dict)
 
 
+def _extract_shaped_advances(
+    font_path: Path,
+    cmap: dict[int, str],
+    contexts: tuple[tuple[str, str], ...] = DEFAULT_SHAPING_CONTEXTS,
+) -> list[ShapedAdvanceOverride]:
+    """Detect cmap codepoints whose total shaped advance differs under any
+    of the given (script, language) contexts vs the default shape.
+
+    Uses HarfBuzz to drive the comparison so substitutions, contextual
+    positioning, and lookups all participate. Only the resulting *advance*
+    is recorded; the substituted glyph itself isn't extracted.
+    """
+    try:
+        import uharfbuzz as hb
+    except ImportError as e:
+        raise RuntimeError(
+            "uharfbuzz is required for include_gsub=True. "
+            "Install with: pip install 'polaris-mcfg[render]'"
+        ) from e
+
+    blob = hb.Blob.from_file_path(str(font_path))
+    face = hb.Face(blob)
+    font = hb.Font(face)
+    upem = face.upem
+
+    out: list[ShapedAdvanceOverride] = []
+    for cp in cmap:
+        # default
+        buf = hb.Buffer()
+        buf.add_codepoints([cp])
+        buf.guess_segment_properties()
+        hb.shape(font, buf)
+        default_adv = sum(p.x_advance for p in buf.glyph_positions)
+
+        for script, lang in contexts:
+            buf = hb.Buffer()
+            buf.add_codepoints([cp])
+            buf.script = script
+            buf.language = lang
+            buf.direction = "ltr"
+            hb.shape(font, buf)
+            ctx_adv = sum(p.x_advance for p in buf.glyph_positions)
+            if ctx_adv != default_adv:
+                out.append(ShapedAdvanceOverride(
+                    codepoint=codepoint_to_id(cp),
+                    script=script,
+                    language=lang,
+                    advance=int(ctx_adv),
+                ))
+    return out
+
+
 def extract_metrics(
     font_path: str | Path,
     *,
     include_lsb: bool = False,
     include_kerning: bool = False,
     include_vertical: bool = False,
+    include_gsub: bool = False,
+    gsub_contexts: tuple[tuple[str, str], ...] = DEFAULT_SHAPING_CONTEXTS,
     deterministic: bool = False,
 ) -> MetricsSpec:
     """Extract a :class:`MetricsSpec` from a font file.
@@ -168,6 +359,11 @@ def extract_metrics(
 
     kerning = _extract_kerning(font, id_of) if include_kerning else None
     vertical = _extract_vertical(font, id_of) if include_vertical else None
+    shaped_advances = None
+    if include_gsub:
+        cmap_dict: dict[int, str] = font.getBestCmap() or {}
+        shaped_advances = _extract_shaped_advances(font_path, cmap_dict,
+                                                    gsub_contexts)
 
     if deterministic:
         extracted_at = "1970-01-01T00:00:00Z"
@@ -187,6 +383,7 @@ def extract_metrics(
         glyphs=glyphs,
         kerning=kerning,
         vertical=vertical,
+        shaped_advances=shaped_advances,
     )
     font.close()
     return spec
@@ -203,17 +400,24 @@ def extract_metrics(
               help="Include classic `kern` table pairs.")
 @click.option("--include-vertical", is_flag=True,
               help="Include vhea/vmtx vertical metrics.")
+@click.option("--include-gsub", is_flag=True,
+              help="Detect script/language-specific shape-induced advance "
+                   "overrides (e.g., Korean wider space) via HarfBuzz. "
+                   "Stored as `shapedAdvances` for opt-in `--apply gsub` "
+                   "in the generator. Slower than other extractors.")
 @click.option("--deterministic", is_flag=True,
               help="Fix volatile fields (timestamp) for reproducible output.")
 @click.option("--indent", type=int, default=2, show_default=True)
 def extract_cmd(font: Path, output: Path | None, include_lsb: bool,
                 include_kerning: bool, include_vertical: bool,
+                include_gsub: bool,
                 deterministic: bool, indent: int) -> None:
     spec = extract_metrics(
         font,
         include_lsb=include_lsb,
         include_kerning=include_kerning,
         include_vertical=include_vertical,
+        include_gsub=include_gsub,
         deterministic=deterministic,
     )
     text = spec.to_json(indent=indent)

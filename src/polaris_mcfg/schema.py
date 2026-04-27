@@ -96,6 +96,30 @@ class GlobalMetrics:
 
 
 @dataclass
+class ShapedAdvanceOverride:
+    """A per-(codepoint, script, language) advance-width override.
+
+    Captures the GSUB-induced advance change when a font shapes a character
+    differently in a given script/language context (e.g., Korean wider
+    space). Cross-licensing aware: stores only numeric advances and tag
+    triples — never glyph outlines.
+    """
+    codepoint: str
+    script: str
+    language: str
+    advance: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"codepoint": self.codepoint, "script": self.script,
+                "language": self.language, "advance": self.advance}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "ShapedAdvanceOverride":
+        return cls(codepoint=d["codepoint"], script=d["script"],
+                   language=d["language"], advance=int(d["advance"]))
+
+
+@dataclass
 class VerticalMetrics:
     vhea: dict[str, Any]
     vmtx: dict[str, VerticalGlyphMetric]
@@ -129,6 +153,7 @@ class MetricsSpec:
     glyphs: dict[str, GlyphMetric] = field(default_factory=dict)
     kerning: list[KerningPair] | None = None
     vertical: VerticalMetrics | None = None
+    shaped_advances: list[ShapedAdvanceOverride] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -144,6 +169,12 @@ class MetricsSpec:
             ]
         if self.vertical is not None:
             d["vertical"] = self.vertical.to_dict()
+        if self.shaped_advances is not None:
+            d["shapedAdvances"] = [
+                ov.to_dict() for ov in
+                sorted(self.shaped_advances,
+                       key=lambda o: (o.codepoint, o.script, o.language))
+            ]
         return d
 
     @classmethod
@@ -158,6 +189,9 @@ class MetricsSpec:
                      if "kerning" in d else None),
             vertical=(VerticalMetrics.from_dict(d["vertical"])
                       if "vertical" in d else None),
+            shaped_advances=([ShapedAdvanceOverride.from_dict(ov)
+                              for ov in d["shapedAdvances"]]
+                             if "shapedAdvances" in d else None),
         )
 
     def to_json(self, *, indent: int = 2) -> str:

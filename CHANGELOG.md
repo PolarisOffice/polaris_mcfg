@@ -2,6 +2,56 @@
 
 All notable changes to Polaris MCFG.
 
+## [0.2.0] — 2026-04-27 — byte-perfect line-break match
+
+Group A (Noto + Polaris PNM) and Group B (Pretendard + Polaris NPM) line
+breaks now match byte-perfectly in the visual test page under both
+`lang="en"` and `lang="ko"`. Achieved through five compounding fixes:
+
+### Added
+- **GPOS pair kerning** (P0/A1, P1/A2): extractor reads GPOS lookup type 2
+  (PairPosFormat 1 + 2, including Extension wrapping). Generator replaces
+  the design font's pair-pos lookups with a new lookup containing the
+  source pairs and rewires the `kern` feature. Mark/cursive/contextual
+  lookups are preserved. ~20K Latin pairs/font in NotoSansKR.
+- **Missing-glyph notdef advance** (P3/A4): `--missing-glyph notdef` now
+  sets the design font's `.notdef` advance to the source's, so glyphs
+  that fall back to .notdef occupy the layout slot the source intended.
+- **UPM rescaling** (P2/A5): `--match-upm` rescales the design font to
+  the source's UPM via fontTools' `scale_upem` before applying metrics,
+  eliminating the ±0.5-unit per-glyph rounding that otherwise drifts
+  line breaks across UPM-mismatched fonts.
+- **Output format `auto`** (P2/A5): `--output-format auto` switches to
+  WOFF2 when `--match-upm` rescaled the design font, working around a
+  Chromium TTF sanitizer rejection of scale_upem'd large CJK TTFs.
+  Forced `ttf` / `woff2` also available.
+- **GSUB shape-induced advance overrides** (v2/A3, opt-in):
+  `--include-gsub` (extract) detects per-(codepoint, script, language)
+  advance changes via HarfBuzz shaping comparison; `--apply gsub`
+  (generate) injects them as `locl` feature substitutions with stub
+  glyphs (empty outline + override advance). Browsers auto-activate
+  `locl` when the page `lang` matches.
+- New CLI flags: `--include-gsub`, `--apply gsub`, `--match-upm`,
+  `--output-format`, `--missing-glyph notdef`.
+- New schema field: `shapedAdvances` (list of overrides).
+- New design docs: 09 (GPOS), 10 (UPM/format), 11 (GSUB).
+
+### Tests
+
+62 → 79 (+17): GPOS extraction & application (6), UPM/format (7), GSUB
+overrides (4). Visual_test verified end-to-end in Chromium via the
+Claude_Preview MCP browser harness.
+
+### Visual test result
+
+```
+                       lang="en"        lang="ko"
+Group A (Noto + PNM):  16 / 16  ✓       16 / 16  ✓
+Group B (Pret + NPM):  15 / 15  ✓       15 / 15  ✓
+```
+
+---
+
 ## [0.1.0] — 2026-04-27
 
 Initial release. Implements the full M1–M7 milestone set from `Requirements.md`.
