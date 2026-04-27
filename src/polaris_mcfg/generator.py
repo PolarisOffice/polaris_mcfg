@@ -366,9 +366,6 @@ def _apply_shaped_advances(
     font's other glyphs visually but the line layout under that script/lang
     matches the source font's shaping.
     """
-    if not metrics.shaped_advances:
-        return {"applied": 0, "skipped": 0}
-
     from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
     from fontTools.ttLib.tables._g_l_y_f import Glyph
 
@@ -376,6 +373,19 @@ def _apply_shaped_advances(
     glyf = font["glyf"]
     hmtx = font["hmtx"]
     glyph_order = list(font.getGlyphOrder())
+
+    # Strip the design font's existing `locl` feature first. `locl` is the
+    # OpenType feature browsers auto-activate based on the page ``lang``
+    # attribute, and it carries the design font's *own* per-script
+    # advance-affecting substitutions (e.g., NotoSansKR's wider Korean
+    # space). Leaving them in place would mean the result font behaves like
+    # the design under lang="ko" rather than like the source. After
+    # stripping we re-inject the source's overrides via FEA below.
+    stripped_locl = _strip_locl_feature(font)
+
+    if not metrics.shaped_advances:
+        return {"applied": 0, "skipped": 0,
+                "strippedDesignLoclLookups": stripped_locl}
 
     stubs_added: list[str] = []
     # Dedupe: at most one substitution per (script, lang, source_glyph).
@@ -438,7 +448,74 @@ def _apply_shaped_advances(
         "skipped": skipped,
         "stubGlyphs": len(stubs_added),
         "contexts": [f"{s}/{l}" for s, l in sorted(contexts.keys())],
+        "strippedDesignLoclLookups": stripped_locl,
     }
+
+
+def _strip_locl_feature(font: TTFont) -> int:
+    """Remove the design font's ``locl`` feature and any lookups exclusively
+    referenced by it. Returns the number of lookups removed.
+
+    Other features (mark, liga, calt, ...) are preserved. We don't touch
+    GSUB if the font has no GSUB table at all.
+    """
+    if "GSUB" not in font:
+        return 0
+    gsub = font["GSUB"].table
+    if not gsub or not gsub.FeatureList:
+        return 0
+
+    # Identify all lookup indices used by `locl` and by every other feature
+    # so we can drop lookups that are *only* used by locl.
+    locl_indices: set[int] = set()
+    other_indices: set[int] = set()
+    for fr in gsub.FeatureList.FeatureRecord:
+        idxs = set(fr.Feature.LookupListIndex)
+        if fr.FeatureTag == "locl":
+            locl_indices |= idxs
+        else:
+            other_indices |= idxs
+    droppable = locl_indices - other_indices
+    if not droppable:
+        return 0
+
+    # Renumber surviving lookups; drop the locl-only ones.
+    new_lookups: list = []
+    old_to_new: dict[int, int] = {}
+    for old_idx, lk in enumerate(gsub.LookupList.Lookup):
+        if old_idx in droppable:
+            continue
+        old_to_new[old_idx] = len(new_lookups)
+        new_lookups.append(lk)
+    gsub.LookupList.Lookup = new_lookups
+    gsub.LookupList.LookupCount = len(new_lookups)
+
+    # Remap remaining feature lookup indices and drop the `locl` feature
+    # records entirely; ScriptList's FeatureIndex lists need parallel updating.
+    surviving_features: list = []
+    feat_idx_remap: dict[int, int] = {}
+    for old_fi, fr in enumerate(gsub.FeatureList.FeatureRecord):
+        if fr.FeatureTag == "locl":
+            continue
+        fr.Feature.LookupListIndex = [old_to_new[i] for i in fr.Feature.LookupListIndex
+                                       if i in old_to_new]
+        fr.Feature.LookupCount = len(fr.Feature.LookupListIndex)
+        feat_idx_remap[old_fi] = len(surviving_features)
+        surviving_features.append(fr)
+    gsub.FeatureList.FeatureRecord = surviving_features
+    gsub.FeatureList.FeatureCount = len(surviving_features)
+
+    for sr in gsub.ScriptList.ScriptRecord:
+        for ls in [sr.Script.DefaultLangSys] + [
+            lsr.LangSys for lsr in sr.Script.LangSysRecord
+        ]:
+            if ls is None:
+                continue
+            ls.FeatureIndex = [feat_idx_remap[i] for i in ls.FeatureIndex
+                                if i in feat_idx_remap]
+            ls.FeatureCount = len(ls.FeatureIndex)
+
+    return len(droppable)
 
 
 # Backward compat for the type signature change in the inline dict above.
