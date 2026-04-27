@@ -101,6 +101,7 @@ open diff.html
 
 ## 문서
 
+- **[로드맵 / 지원 범위](ROADMAP.md)** — 공개 사용 전 반드시 확인 (TTF 외 컨테이너·RTL/Indic·mark positioning 등 한계 매트릭스).
 - [요구사항](Requirements.md)
 - [설계 문서](docs/design/)
   - [01. 아키텍처 개요](docs/design/01-architecture.md)
