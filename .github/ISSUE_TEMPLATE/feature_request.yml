@@ -1,0 +1,62 @@
+name: ✨ Feature request
+description: 새로운 기능 제안 또는 기존 기능 확장
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        제안 감사합니다. **제출 전에 [ROADMAP.md](../ROADMAP.md)에 이미 등재된 항목인지 확인해주세요** — 있다면 해당 ROADMAP ID(R1, R2, ...)를 참조해주세요.
+
+        의도적 out-of-scope 항목들은 [ROADMAP §4](../ROADMAP.md#4-명시적으로-out-of-scope)에 정리되어 있으며 (AAT/Graphite, 색상/비트맵 글리프, **글리프 외형 추출**, 자동 (script, lang) 매트릭스 probe, GUI-우선 워크플로우), 이 영역은 새 이슈로도 받지 않습니다.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 해결하려는 문제
+      description: |
+        무엇이 어렵거나 불가능한지 구체적으로 설명해주세요. 사용자 시나리오 형식 권장:
+        - 누가
+        - 무엇을 하려고 하는데
+        - 어떤 상황에서
+        - 어떤 결과가 일어나서 어려움
+      placeholder: |
+        예: 출판사 사용자가 사내 폰트 X로 작성된 인쇄 원고를 자유 라이센스 환경(웹 미리보기)에 동일 레이아웃으로 옮기려는데, 폰트 X의 GPOS mark positioning이 결과 폰트에 이식 안 되어 한글 자모 결합 문서의 위치가 어긋남.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 제안하는 해결 방법
+      description: 가능하면 구체적인 API / CLI 형태도 함께. 대안이 여러 개면 trade-off를 같이.
+      placeholder: |
+        예: --apply mark-positioning 플래그 추가. 추출기는 GPOS lookup type 4/5/6의 anchor 정보를 codepoint 기반으로 정규화. 생성기는 디자인 폰트의 glyph name으로 매핑 후 anchor 재배선.
+
+        대안: HarfBuzz로 마크가 적용된 결과를 측정해 최종 advance/positioning만 캡처 (lossy하나 라이센스 안전성 ↑).
+    validations:
+      required: true
+
+  - type: textarea
+    id: roadmap_ref
+    attributes:
+      label: ROADMAP 참조
+      description: 이미 등재된 항목이면 ID(R3, R4, R-hancom 등). 새 항목이면 비워둠.
+      placeholder: "R6 (GPOS mark positioning 이식)"
+
+  - type: textarea
+    id: priority
+    attributes:
+      label: 영향 / 사용 빈도
+      description: 본인 또는 팀의 사용 사례에서 얼마나 자주 발생하나요? 워크어라운드는 있나요?
+      placeholder: |
+        - 매월 ~50건의 사내 문서 변환 워크플로우에서 발생
+        - 현재 워크어라운드: 디아크리틱 사용 안 하는 텍스트로만 사용 → 적용 범위 제한적
+
+  - type: textarea
+    id: out_of_scope_check
+    attributes:
+      label: out-of-scope 점검
+      description: 본 제안이 ROADMAP §4의 영구 out-of-scope 영역과 겹치지 않는지 확인하셨나요? (글리프 외형 추출, AAT/Graphite, 색상/비트맵 글리프 등)
+      placeholder: "확인했고, 영구 out-of-scope에 해당하지 않습니다."
+    validations:
+      required: true

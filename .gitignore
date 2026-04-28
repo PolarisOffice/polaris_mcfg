@@ -48,3 +48,8 @@ samples/visual_test/out/
 # slash anchors the rule to the repo root so docs/demo/fonts/ (committed,
 # subsetted redistributables) is not affected.
 /fonts/
+# Locally-imported licensed font samples for analysis only (never push).
+/_local_fonts/
+
+# Claude Code worktrees
+.claude/worktrees/
