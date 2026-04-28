@@ -4,6 +4,7 @@
 
 > 본 도구는 **글리프 외형(outline)을 추출/복제하지 않으며**, 숫자 메트릭만 다룹니다 ([라이센스 안전 경계](docs/design/02-metrics-schema.md#라이센스-안전-경계)).
 
+[![CI](https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg/actions/workflows/ci.yml/badge.svg)](https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg/actions/workflows/ci.yml)
 [![tests](https://img.shields.io/badge/tests-84%20passed-green)](tests/)
 [![demo](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://miles-haeseok-lee-80.github.io/polaris_mcfg/)
 [![python](https://img.shields.io/badge/python-3.10+-blue)](pyproject.toml)
