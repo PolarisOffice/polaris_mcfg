@@ -51,5 +51,7 @@ samples/visual_test/out/
 # Locally-imported licensed font samples for analysis only (never push).
 /_local_fonts/
 
-# Claude Code worktrees
+# Claude Code internal state
 .claude/worktrees/
+.claude/scheduled_tasks.lock
+.claude/*.lock
