@@ -49,10 +49,10 @@ Bundle of fixes from the v0.2.1 self-review. Tests 79 → 84.
   check accepts those suffixes too. `render._hb_readable_path` context
   manager transparently decompresses WOFF/WOFF2 to a temp TTF for
   HarfBuzz, which can't read the compressed flavors directly.
-- **`uharfbuzz` install hint**: error messages no longer point at the
-  not-yet-published `polaris-mcfg[render]` PyPI extra; they direct
-  users to `pip install -e '.[dev]'` from a checkout, or
-  `pip install uharfbuzz` standalone.
+- **`uharfbuzz` install hint**: error messages now direct users to
+  `pip install -e '.[dev]'` from a checkout, or `pip install uharfbuzz`
+  standalone (PyPI distribution is intentionally not on the roadmap —
+  see ROADMAP §3).
 - **kerning diff now honors `--threshold`**: was only used for global /
   advance / lsb / vertical; now the kerning section drops
   ±threshold-or-less differences too, matching the rest.
