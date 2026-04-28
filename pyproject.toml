@@ -23,7 +23,10 @@ classifiers = [
     "Topic :: Text Processing :: Fonts",
 ]
 dependencies = [
-    "fonttools>=4.50",
+    # WOFF2 output is a core feature (--match-upm auto-selects WOFF2 to
+    # work around the Chromium TTF sanitizer issue), so brotli is a hard
+    # runtime dep, not a fontTools optional.
+    "fonttools[woff]>=4.50",
     "click>=8.1",
 ]
 
