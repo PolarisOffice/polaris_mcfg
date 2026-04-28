@@ -73,20 +73,36 @@ def _hb_readable_path(font_path: str | Path):
     HarfBuzz/uharfbuzz reads OpenType from raw TTF/OTF bytes; it does *not*
     transparently decompress WOFF / WOFF2. For those flavors we materialize
     a TTF copy in a temp file and yield that.
+
+    Implementation note: we use ``mkstemp`` + immediate ``os.close`` rather
+    than ``NamedTemporaryFile`` because the latter holds the file open for
+    the lifetime of the ``with`` block, which on Windows blocks unlinking
+    (PermissionError [WinError 32]). HarfBuzz may also keep a memory-
+    mapped view of the file alive after our local handles drop, so on
+    Windows the unlink can still race; we treat that as benign and let the
+    OS clean up the temp file later.
     """
+    import os
     p = Path(font_path)
-    if p.suffix.lower() in (".woff", ".woff2"):
+    if p.suffix.lower() not in (".woff", ".woff2"):
+        yield str(p)
+        return
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".ttf")
+    os.close(fd)
+    try:
         ft = TTFont(str(p))
         ft.flavor = None
-        with tempfile.NamedTemporaryFile(suffix=".ttf", delete=False) as tmp:
-            ft.save(tmp.name)
-            ft.close()
-            try:
-                yield tmp.name
-            finally:
-                Path(tmp.name).unlink(missing_ok=True)
-    else:
-        yield str(p)
+        ft.save(tmp_path)
+        ft.close()
+        yield tmp_path
+    finally:
+        try:
+            Path(tmp_path).unlink(missing_ok=True)
+        except (PermissionError, OSError):
+            # Windows: HarfBuzz mapping may still be live. Temp file gets
+            # collected by the OS on next reboot or %TEMP% sweep.
+            pass
 
 
 def measure_line(font_path: str | Path, text: str) -> LineMeasurement:
