@@ -246,6 +246,15 @@ def _apply_kerning(font: TTFont, metrics: MetricsSpec,
     if not metrics.kerning:
         return {"pairs": 0, "skipped": 0}
 
+    # Kerning values are in source-font units, so they need the same UPM
+    # scaling that advance widths get. Without this, generating into a
+    # design font with a different UPM produces visibly over- or
+    # under-kerned text (e.g., source UPM 2000 -> design UPM 1000 doubles
+    # the apparent kern). When --match-upm is in effect the design has
+    # been rescaled to source UPM and this becomes a no-op.
+    src_upm = metrics.global_metrics.unitsPerEm
+    dst_upm = font["head"].unitsPerEm
+
     pairs: dict[tuple[str, str], int] = {}
     skipped = 0
     for p in metrics.kerning:
@@ -254,7 +263,7 @@ def _apply_kerning(font: TTFont, metrics: MetricsSpec,
         if l is None or r is None:
             skipped += 1
             continue
-        pairs[(l, r)] = p.value
+        pairs[(l, r)] = _scaled(p.value, src_upm, dst_upm)
 
     if not pairs:
         return {"pairs": 0, "skipped": skipped}
@@ -279,12 +288,24 @@ def _write_classic_kern(font: TTFont, pairs: dict[tuple[str, str], int]) -> None
 
 
 def _write_gpos_kern(font: TTFont, pairs: dict[tuple[str, str], int]) -> None:
-    """Inject a GPOS PairPos lookup, replacing existing pair-pos lookups.
+    """Inject a GPOS PairPos lookup and rewire only the ``kern`` feature.
 
-    Existing non-pair lookups (mark, cursive, contextual, ...) are preserved.
-    The ``kern`` feature record is rewired to reference our new lookup; if
-    the design font has no ``kern`` feature, one is added across all scripts
-    that already exist in GPOS.
+    Strategy (mirrors ``_strip_locl_feature``): we **never delete existing
+    GPOS lookups**. The same PairPos lookups can be referenced from
+    multiple features (``cpsp``/``palt``/``halt``/...) or from contextual
+    positioning lookups (type 7/8) via SubstLookupRecord, so dropping them
+    risks silently breaking unrelated positioning or leaving dangling
+    nested-lookup indices.
+
+    Instead:
+    1. Append our new pair lookup at the end of LookupList.
+    2. From the ``kern`` FeatureRecord (only), remove any LookupListIndex
+       that points at an existing PairPos lookup, then append our index.
+    3. Other feature records and contextual lookups stay byte-identical.
+
+    The unhooked-from-kern existing PairPos lookups remain reachable from
+    whatever other feature/lookup referenced them. If they were exclusive
+    to ``kern`` they become dead but harmless (small file-size cost).
     """
     from fontTools.otlLib import builder as otl
     from fontTools.ttLib.tables import otTables as ot
@@ -318,32 +339,25 @@ def _write_gpos_kern(font: TTFont, pairs: dict[tuple[str, str], int]) -> None:
 
     gpos = font["GPOS"].table
 
-    # Filter out existing pair-positioning lookups (and Extension wrappers
-    # around them); remap surviving lookup indices.
-    new_lookups: list = []
-    old_to_new: dict[int, int] = {}
-    for old_idx, lk in enumerate(gpos.LookupList.Lookup):
-        if _lookup_is_pair_pos(lk):
-            continue
-        old_to_new[old_idx] = len(new_lookups)
-        new_lookups.append(lk)
-    new_kern_idx = len(new_lookups)
-    new_lookups.append(kern_lookup)
+    # Append our new lookup. Existing lookup indices are preserved so any
+    # reference (from features or contextual SubstLookupRecords) stays valid.
+    new_kern_idx = len(gpos.LookupList.Lookup)
+    gpos.LookupList.Lookup.append(kern_lookup)
+    gpos.LookupList.LookupCount = len(gpos.LookupList.Lookup)
 
-    gpos.LookupList.Lookup = new_lookups
-    gpos.LookupList.LookupCount = len(new_lookups)
-
-    # Update FeatureList lookup indices and rewire the ``kern`` feature.
+    # Detach existing PairPos lookups from the ``kern`` feature only.
+    # They remain in LookupList for any other feature that references them.
     has_kern = False
     for fr in gpos.FeatureList.FeatureRecord:
-        old_idxs = list(fr.Feature.LookupListIndex)
-        kept = [old_to_new[i] for i in old_idxs if i in old_to_new]
-        if fr.FeatureTag == "kern":
-            kept = [i for i in kept if i != new_kern_idx]
-            kept.append(new_kern_idx)
-            has_kern = True
+        if fr.FeatureTag != "kern":
+            continue
+        kept = [i for i in fr.Feature.LookupListIndex
+                if i < new_kern_idx
+                and not _lookup_is_pair_pos(gpos.LookupList.Lookup[i])]
+        kept.append(new_kern_idx)
         fr.Feature.LookupListIndex = kept
         fr.Feature.LookupCount = len(kept)
+        has_kern = True
 
     if not has_kern:
         feat = ot.Feature()
@@ -431,17 +445,20 @@ def _apply_shaped_advances(
     """Inject `--apply gsub` overrides as ``locl``-feature substitutions.
 
     For each ``ShapedAdvanceOverride``:
-    1. Add a stub glyph (empty outline, override advance) to the design font.
+    1. Add a stub glyph that **copies the design font's outline** for that
+       codepoint and only changes the advance to the source's override
+       value. (Earlier versions used an empty-outline stub, which made
+       visible glyphs disappear under the override's script/language.)
     2. Add a single GSUB substitution under the override's (script, language)
        context, registered in the ``locl`` (Localized Forms) feature so
        browsers auto-apply it when the matching ``lang`` attribute is set.
 
-    The stub glyph carries no outline, so the result reflects the design
-    font's other glyphs visually but the line layout under that script/lang
-    matches the source font's shaping.
+    The result preserves the design font's visual identity while applying
+    the source font's per-(script, lang) advance shifts (e.g., wider
+    Korean punctuation, wider Korean space).
     """
+    import copy
     from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
-    from fontTools.ttLib.tables._g_l_y_f import Glyph
 
     cmap = font.getBestCmap() or {}
     glyf = font["glyf"]
@@ -486,13 +503,17 @@ def _apply_shaped_advances(
             continue
         stub_name = f"polaris.{ov.codepoint[2:]}.{ov.script}_{ov.language}"
         if stub_name not in glyf.glyphs:
-            stub = Glyph()
-            stub.numberOfContours = 0
-            glyf[stub_name] = stub
+            # Clone the design's glyph outline so visible glyphs stay
+            # visible under the substitution. Composite glyphs reference
+            # other glyphs by name, which deepcopy preserves intact.
+            glyf[stub_name] = copy.deepcopy(glyf[gn])
             glyph_order.append(stub_name)
             stubs_added.append(stub_name)
             advance = _scaled(ov.advance, src_upm, dst_upm)
-            hmtx.metrics[stub_name] = (advance, 0)
+            # Keep the design glyph's LSB so the visible outline stays
+            # positioned the same; only the advance reflects the override.
+            old_lsb = hmtx.metrics[gn][1] if gn in hmtx.metrics else 0
+            hmtx.metrics[stub_name] = (advance, old_lsb)
         contexts.setdefault(ctx, {})[gn] = stub_name
 
     if not contexts:

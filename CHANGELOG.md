@@ -33,6 +33,56 @@ exclusive use case.
 
 ---
 
+## [0.2.4] — 2026-04-29 — codex review bundle
+
+External code review surfaced four issues, all fixed. Tests 84 → 88.
+
+### Fixed
+- **GSUB override no longer hides visible glyphs.** Earlier versions
+  created an empty-outline stub for every shaped-advance override and
+  routed substitutions there. The extractor records *any* codepoint
+  whose shaped advance changes — not just whitespace — so visible
+  punctuation (`,` `.` `?` `'` `"` `—` etc., 25+ glyphs in NotoSansKR
+  under hang/KOR) was vanishing under `lang="ko"` rendering. The stub
+  now `copy.deepcopy`s the design font's glyph outline for that
+  codepoint and only overrides the advance + LSB.
+- **Kerning values are UPM-scaled.** `_apply_kerning` was writing source
+  unit values directly into design-UPM-relative tables. With source
+  upm=2000 / design upm=1000 a `-200` pair came out at `-200` instead of
+  `-100`, visibly over-kerning. Now passes through `_scaled(value,
+  src_upm, dst_upm)` (no-op when `--match-upm` already aligned UPMs).
+- **PairPos lookups in non-`kern` features are preserved.** The GPOS
+  writer used to drop *every* lookup of type 2 and remap the FeatureList
+  indices, which (a) silently broke design-font behavior when a PairPos
+  was reused by `cpsp`/`palt`/etc., and (b) left dangling
+  SubstLookupRecord indices in contextual lookups (type 7/8). Now
+  follows the same pattern as `_strip_locl_feature`: append our new
+  lookup, detach existing PairPos indices from the `kern` feature only,
+  leave LookupList intact so other features and contextual references
+  stay valid.
+- **`OFL-NotoSansKR.txt` corrected.** Both `fonts/Noto_Sans_KR/OFL.txt`
+  and `docs/demo/fonts/OFL-NotoSansKR.txt` shipped Adobe's Source-Han
+  copyright (this is the OFL file Google Fonts bundles in the Noto Sans
+  KR zip download — a known packaging issue). Replaced with the
+  canonical [notofonts/noto-cjk LICENSE][noto-cjk-license].
+
+[noto-cjk-license]: https://github.com/notofonts/noto-cjk/blob/main/Sans/LICENSE
+
+### Added (regression tests, +4)
+- `tests/test_codex_review.py`:
+  - GSUB stub clones design outline (visible glyphs stay visible)
+  - kerning UPM scaling (source upm=2000 → design upm=1000 halves values)
+  - kerning UPM no-op when UPMs match
+  - PairPos lookup referenced by `cpsp` survives our kern injection
+
+### Verified
+- 88 pytest tests passing (was 84).
+- Demo rebuild: 27 visible-outline stub glyphs land in subsetted PNM
+  woff2 (subsetter renames them anonymously but preserves outlines and
+  the locl substitution mapping).
+
+---
+
 ## [0.2.2] — 2026-04-27 — code review bundle
 
 Bundle of fixes from the v0.2.1 self-review. Tests 79 → 84.
