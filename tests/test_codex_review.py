@@ -129,6 +129,118 @@ def test_kerning_values_no_op_when_upms_match(tmp_font_dir: Path):
 
 # ---------- P2: PairPos lookups in non-kern features survive ----------
 
+def test_scale_glyph_center_preserves_composite_components(tmp_font_dir: Path):
+    """`--scale-glyph center`/`fit` must not break composites that share a
+    simple-glyph component with another cmap-mapped glyph.
+
+    Concrete failure mode: Pretendard's ``dotaccent`` glyph is the
+    visible dot on i/j/ä/ö. It's also cmap-mapped at U+02D9. Without
+    pre-decomposing composites, transforming the U+02D9 glyph in the
+    main loop would shift dotaccent's contours, leaking into every
+    composite that uses dotaccent as the dot — visibly detaching the
+    dot from the stem. This test sets up that exact topology with a
+    handcrafted FontBuilder font and asserts the dot stays attached.
+    """
+    from fontTools.fontBuilder import FontBuilder
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+    from fontTools.ttLib import TTFont
+
+    # Build a tiny design font where 'dotaccent' is shared between U+02D9
+    # (a standalone dot above) and 'i' (a composite of dotlessi + dotaccent).
+    fb = FontBuilder(1000, isTTF=True)
+    glyph_order = [".notdef", "space", "i", "dotlessi", "dotaccent"]
+    fb.setupGlyphOrder(glyph_order)
+    fb.setupCharacterMap({0x20: "space", 0x69: "i", 0x02D9: "dotaccent"})
+
+    def stem_pen(left, right):
+        p = TTGlyphPen(None)
+        p.moveTo((left, 0)); p.lineTo((right, 0))
+        p.lineTo((right, 600)); p.lineTo((left, 600)); p.closePath()
+        return p.glyph()
+
+    def dot_pen(left, right, bottom, top):
+        p = TTGlyphPen(None)
+        p.moveTo((left, bottom)); p.lineTo((right, bottom))
+        p.lineTo((right, top)); p.lineTo((left, top)); p.closePath()
+        return p.glyph()
+
+    glyphs = {
+        ".notdef": stem_pen(0, 50),
+        "space": TTGlyphPen(None).glyph(),
+        "dotlessi": stem_pen(40, 60),         # narrow vertical stem
+        "dotaccent": dot_pen(40, 60, 700, 760),  # square dot above where stem ends
+    }
+    # 'i' is a composite of dotlessi + dotaccent
+    i_pen = TTGlyphPen({k: v for k, v in glyphs.items()})
+    i_pen.addComponent("dotlessi", (1, 0, 0, 1, 0, 0))
+    i_pen.addComponent("dotaccent", (1, 0, 0, 1, 0, 0))
+    glyphs["i"] = i_pen.glyph()
+
+    fb.setupGlyf(glyphs)
+    fb.setupHorizontalMetrics({
+        ".notdef": (100, 0),
+        "space": (250, 0),
+        "i": (100, 40),
+        "dotlessi": (100, 40),
+        "dotaccent": (100, 40),
+    })
+    fb.setupHorizontalHeader(ascent=800, descent=-200)
+    fb.setupOS2(sTypoAscender=800, sTypoDescender=-200)
+    fb.setupNameTable({"familyName": "Test", "styleName": "Regular"})
+    fb.setupPost()
+
+    dsn = tmp_font_dir / "design.ttf"
+    fb.save(str(dsn))
+
+    # Source: deliberately wider advance for U+02D9 + same upm so center
+    # mode wants to shift dotaccent right by a non-zero amount.
+    src = make_test_font(tmp_font_dir / "src.ttf",
+                         glyph_widths={".notdef": 100, "A": 600, "B": 650, "space": 250})
+    spec = extract_metrics(src, deterministic=True)
+    spec.global_metrics.unitsPerEm = 1000
+    # Inject a U+02D9 with much wider advance than design's 100u so center
+    # would compute a meaningful shift.
+    spec.glyphs["U+02D9"] = GlyphMetric(advanceWidth=400)
+    spec.glyphs["U+0069"] = GlyphMetric(advanceWidth=400)
+
+    out = tmp_font_dir / "out.ttf"
+    generate_font(spec, dsn, out, apply=("global", "advance"),
+                  scale_glyph="center")
+
+    f = TTFont(str(out))
+    g_i = f["glyf"]["i"]
+    # After our pre-decompose, 'i' is a simple glyph that owns its
+    # contours and is unaffected by the U+02D9 transformation.
+    assert not g_i.isComposite(), \
+        "composite should have been pre-decomposed before center transform"
+    coords = list(g_i.coordinates)
+    # The stem and dot contours should overlap horizontally — i.e., the
+    # dot's x-range intersects the stem's. Without the decompose pre-pass
+    # the dot would have shifted right alongside the dotaccent transform
+    # while the composite-stem stayed put, leaving them disjoint.
+    ends = list(g_i.endPtsOfContours)
+    starts = [0] + [e + 1 for e in ends[:-1]]
+    contour_xranges = []
+    for s, e in zip(starts, ends):
+        xs = [c[0] for c in coords[s:e + 1]]
+        contour_xranges.append((min(xs), max(xs)))
+    # Sort by y so we know which is the dot vs stem
+    coords_per_contour = [coords[s:e + 1] for s, e in zip(starts, ends)]
+    contour_yranges = [(min(c[1] for c in cs), max(c[1] for c in cs))
+                       for cs in coords_per_contour]
+    # The contour with the higher y range is the dot.
+    dot_idx = max(range(len(contour_yranges)), key=lambda i: contour_yranges[i][1])
+    stem_idx = 1 - dot_idx if len(contour_yranges) == 2 else 0
+    dot_xrange = contour_xranges[dot_idx]
+    stem_xrange = contour_xranges[stem_idx]
+    overlap = (max(dot_xrange[0], stem_xrange[0]),
+               min(dot_xrange[1], stem_xrange[1]))
+    assert overlap[0] <= overlap[1], (
+        f"dot and stem should overlap horizontally; got dot x∈{dot_xrange}, "
+        f"stem x∈{stem_xrange}")
+    f.close()
+
+
 def test_pairpos_in_non_kern_feature_is_preserved(tmp_font_dir: Path):
     """Design font's PairPos lookups referenced from a non-kern feature
     (e.g., ``cpsp``) must NOT be dropped when we inject our kern lookup.

@@ -53,8 +53,12 @@ def _transform_glyph(font: TTFont, gname: str,
                      scale_x: float, translate_x: int) -> None:
     """Apply (scale_x, translate_x) to ``gname`` in place, in the ``glyf`` table.
 
-    Composite glyphs are decomposed by ``TTGlyphPen``; this is a known
-    side-effect documented in design/05-generator.md.
+    Caller must ensure that any composite glyphs sharing ``gname`` as a
+    component have already been decomposed (see ``_decompose_all_composites``).
+    Otherwise the transform leaks into every parent composite — e.g.,
+    Pretendard's ``dotaccent`` (the dot used by i/j/ä/ö/...) is also
+    cmap-mapped to U+02D9; transforming it at the top-level loop without
+    pre-decomposing breaks every glyph that uses it as the dot.
     """
     if scale_x == 1.0 and translate_x == 0:
         return
@@ -65,6 +69,38 @@ def _transform_glyph(font: TTFont, gname: str,
     new_glyph = pen.glyph()
     new_glyph.recalcBounds(font["glyf"])
     font["glyf"][gname] = new_glyph
+
+
+def _decompose_all_composites(font: TTFont) -> int:
+    """Convert every composite glyph in ``glyf`` into a simple glyph that
+    bakes in component transformations and contours.
+
+    Required before any per-glyph horizontal shift (``--scale-glyph
+    fit``/``center``). Without it, a simple glyph that's also referenced
+    as a component (e.g., ``dotaccent`` shared by ``i``/``j``/``ä``/``ö``
+    and cmap-mapped at U+02D9) would, when transformed in the main loop,
+    propagate its translation to every parent composite — visibly
+    detaching the dot from the stem.
+
+    Returns the number of composites decomposed.
+    """
+    from fontTools.pens.recordingPen import DecomposingRecordingPen
+
+    glyf = font["glyf"]
+    glyph_set = font.getGlyphSet()
+    n = 0
+    for name in list(glyf.glyphs):
+        if not glyf[name].isComposite():
+            continue
+        rec = DecomposingRecordingPen(glyph_set)
+        glyph_set[name].draw(rec)
+        out = TTGlyphPen(glyph_set)
+        rec.replay(out)
+        new_glyph = out.glyph()
+        new_glyph.recalcBounds(glyf)
+        glyf[name] = new_glyph
+        n += 1
+    return n
 
 
 def _apply_global(font: TTFont, metrics: MetricsSpec) -> None:
@@ -91,6 +127,12 @@ def _apply_advance_and_lsb(font: TTFont, metrics: MetricsSpec,
                            id_to_name: dict[str, str | None],
                            scale_mode: str, include_lsb: bool,
                            missing_mode: str) -> dict[str, Any]:
+    # When scale_mode is fit/center, any glyph we shift could be shared
+    # as a component by other composites. Pre-decompose all composites
+    # so each parent owns its outline contours independently.
+    if scale_mode != "none":
+        _decompose_all_composites(font)
+
     """Apply advance widths (and optionally LSBs) from ``metrics`` to ``font``.
 
     ``missing_mode`` controls what happens to source codepoints that the
