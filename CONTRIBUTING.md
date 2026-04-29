@@ -11,7 +11,7 @@
 ### 환경 셋업
 
 ```bash
-git clone https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg
+git clone https://github.com/PolarisOffice/polaris_mcfg
 cd polaris_mcfg
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'

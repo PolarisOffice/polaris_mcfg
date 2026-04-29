@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 🔒 보안 취약점 (비공개 신고)
-    url: https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg/security/advisories/new
+    url: https://github.com/PolarisOffice/polaris_mcfg/security/advisories/new
     about: 보안 이슈는 SECURITY.md 정책에 따라 비공개 채널로 신고해주세요.
   - name: 📖 문서 / 사용법 질문
-    url: https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg#readme
+    url: https://github.com/PolarisOffice/polaris_mcfg#readme
     about: 사용법은 README, ROADMAP, docs/design/ 부터 확인해주세요.

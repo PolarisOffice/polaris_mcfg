@@ -224,7 +224,7 @@ def _render_demo_html(*, cache_buster: str) -> str:
 <header style="border-bottom: 1px solid #ddd; padding-bottom: 12px; margin-bottom: 24px;">
   <p style="margin: 0; font-size: 12px; color: #888;">
     <a href="../" style="color: inherit;">&larr; polaris_mcfg</a> &middot;
-    <a href="https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg" style="color: inherit;">GitHub</a>
+    <a href="https://github.com/PolarisOffice/polaris_mcfg" style="color: inherit;">GitHub</a>
   </p>
   <h1 style="margin: 6px 0 4px; font-size: 22px;">Polaris MCFG &mdash; Live demo</h1>
   <p style="margin: 0; color: #555; font-size: 14px;">

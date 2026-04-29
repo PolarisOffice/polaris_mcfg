@@ -38,9 +38,9 @@ dev = ["pytest>=7", "uharfbuzz>=0.39"]
 mcfg = "polaris_mcfg.cli:main"
 
 [project.urls]
-Repository = "https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg"
-Issues = "https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg/issues"
-Changelog = "https://github.com/Miles-Haeseok-Lee-80/polaris_mcfg/blob/main/CHANGELOG.md"
+Repository = "https://github.com/PolarisOffice/polaris_mcfg"
+Issues = "https://github.com/PolarisOffice/polaris_mcfg/issues"
+Changelog = "https://github.com/PolarisOffice/polaris_mcfg/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]

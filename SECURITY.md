@@ -38,8 +38,10 @@ v1.0 이후 LTS 정책이 도입될 예정입니다 — [ROADMAP.md](ROADMAP.md)
 2. 영향 받는 버전, 재현 단계, 가능한 영향 범위(권한·범위) 기술
 3. 제보자 정보(연락 가능 이메일) 포함
 
-### 이메일 (백업)
-[Maintainer profile](https://github.com/Miles-Haeseok-Lee-80) 의 공개 이메일로 제목에 `[SECURITY]` 표시하여 송부.
+### 백업 채널
+GitHub Private Vulnerability Reporting을 사용할 수 없는 환경이라면
+[PolarisOffice 조직 페이지](https://github.com/PolarisOffice)의 공개 연락처를
+이용하시고, 이메일 제목에 `[SECURITY] polaris_mcfg` 를 표기해주세요.
 
 ## 응답 SLA
 
