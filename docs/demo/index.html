@@ -21,22 +21,22 @@
 
 @font-face {
   font-family: 'OrigNoto';
-  src: url('fonts/00-NotoSansKR-Regular.woff2?cb=1777426979') format('woff2');
+  src: url('fonts/00-NotoSansKR-Regular.woff2?cb=1777445062') format('woff2');
   font-display: block;
 }
 @font-face {
   font-family: 'OrigPretendard';
-  src: url('fonts/01-Pretendard-Regular.woff2?cb=1777426979') format('woff2');
+  src: url('fonts/01-Pretendard-Regular.woff2?cb=1777445062') format('woff2');
   font-display: block;
 }
 @font-face {
   font-family: 'PolarisNPM';
-  src: url('fonts/02-Polaris-NPM-Regular.woff2?cb=1777426979') format('woff2');
+  src: url('fonts/02-Polaris-NPM-Regular.woff2?cb=1777445062') format('woff2');
   font-display: block;
 }
 @font-face {
   font-family: 'PolarisPNM';
-  src: url('fonts/03-Polaris-PNM-Regular.woff2?cb=1777426979') format('woff2');
+  src: url('fonts/03-Polaris-PNM-Regular.woff2?cb=1777445062') format('woff2');
   font-display: block;
 }
 
@@ -151,6 +151,11 @@ table.numbers td:first-child, table.numbers th:first-child { text-align: left; }
     NotoSansKR &amp; Pretendard 두 OFL 폰트로 메트릭 교차 합성한 결과.
     같은 메트릭 그룹의 두 폰트는 외형이 달라도 동일 위치에서 줄바꿈해야 합니다.
     폰트 파일은 데모 텍스트에 맞춰 subset 후 WOFF2로 압축됨 (~50 KB/font).
+  </p>
+  <p style="margin: 8px 0 0; color: #888; font-size: 12px;">
+    합성 폰트는 <code>--scale-glyph center</code> 옵션으로 빌드되어,
+    advance 박스가 디자인 폰트 원래 폭과 다를 때 글리프를 박스 중앙에 정렬합니다.
+    advance(라인브레이크)는 그대로 보존되며, 글리프 외형도 변형 없이 위치만 평행 이동합니다.
   </p>
 </header>
 

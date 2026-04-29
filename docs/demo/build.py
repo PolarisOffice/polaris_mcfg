@@ -137,11 +137,18 @@ def main() -> int:
     npm_full = tmp / "npm_full.woff2"
     pnm_full = tmp / "pnm_full.woff2"
 
-    print("[3/5] generating Polaris NPM + PNM (full) ...")
+    # scale_glyph="center" centers the design glyph horizontally inside
+    # each advance box (advance unchanged, only glyph position shifts).
+    # Eliminates the LEFT-aligned-in-wider-box artifact: e.g.,
+    # Pretendard's narrow "1" glyph (width 264u) sitting at LSB=52 inside
+    # NotoSansKR's 555u advance box, which left a visible gap before "2".
+    # Line-break equivalence is preserved since advance widths don't change.
+    print("[3/5] generating Polaris NPM + PNM (full, scale_glyph=center) ...")
     s1 = generate_font(
         pret_spec, NOTO, npm_full,
         apply=("global", "advance", "kerning", "gsub"),
         match_upm=True,
+        scale_glyph="center",
         output_format="woff2",
         family_name="Polaris NPM",
         style_name="Regular",
@@ -153,6 +160,7 @@ def main() -> int:
         noto_spec, PRET, pnm_full,
         apply=("global", "advance", "kerning", "gsub"),
         match_upm=True,
+        scale_glyph="center",
         output_format="woff2",
         family_name="Polaris PNM",
         style_name="Regular",
@@ -231,6 +239,11 @@ def _render_demo_html(*, cache_buster: str) -> str:
     NotoSansKR &amp; Pretendard 두 OFL 폰트로 메트릭 교차 합성한 결과.
     같은 메트릭 그룹의 두 폰트는 외형이 달라도 동일 위치에서 줄바꿈해야 합니다.
     폰트 파일은 데모 텍스트에 맞춰 subset 후 WOFF2로 압축됨 (~50 KB/font).
+  </p>
+  <p style="margin: 8px 0 0; color: #888; font-size: 12px;">
+    합성 폰트는 <code>--scale-glyph center</code> 옵션으로 빌드되어,
+    advance 박스가 디자인 폰트 원래 폭과 다를 때 글리프를 박스 중앙에 정렬합니다.
+    advance(라인브레이크)는 그대로 보존되며, 글리프 외형도 변형 없이 위치만 평행 이동합니다.
   </p>
 </header>
 """
