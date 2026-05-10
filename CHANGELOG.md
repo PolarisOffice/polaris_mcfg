@@ -2,6 +2,18 @@
 
 All notable changes to Polaris MCFG.
 
+## [0.2.5] — 2026-05-11 — public release tag
+
+First tagged release after the repository moved to `PolarisOffice/polaris_mcfg`
+and went public.
+
+### Fixed
+- `README.md` demo badge and "Live demo →" link pointed at the GitHub
+  Pages landing page (`/`) instead of the interactive demo at `/demo/`.
+  Both now resolve to the actual line-break comparison page.
+
+---
+
 ## [0.2.3] — 2026-04-27 — generalize source-font terminology
 
 The "Hancom font" framing was always meant as one motivating example;
