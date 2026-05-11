@@ -37,6 +37,12 @@ from .analyzer import (
     measure_glyph_bbox,
 )
 from .backends import RenderBackend, RenderRequest
+from .kerning import (
+    DEFAULT_KERN_THRESHOLD_UNITS,
+    PairCandidate,
+    default_pair_candidates,
+    extract_kerning_pairs,
+)
 from .units import pixel_to_unit, pixel_to_unit_float
 
 # Default characters used for vertical-metric probing.
@@ -257,6 +263,8 @@ def extract_via_render(
     skip_kerning: bool = False,
     max_glyphs: int | None = None,
     progress: bool = False,
+    pair_candidates: list[PairCandidate] | None = None,
+    kern_threshold_units: int = DEFAULT_KERN_THRESHOLD_UNITS,
 ) -> MetricsSpec:
     """Render-based extraction.
 
@@ -301,8 +309,13 @@ def extract_via_render(
         global_dicts = _measure_global(backend, size_px=size_px, upem=upem_used)
 
         glyphs: dict[str, GlyphMetric] = {}
+        # Pixel-space advances retained for downstream kerning measurement
+        # (the kerning measurer needs left-glyph advance in *pixels*, not
+        # in font units, to compute the cursor delta).
+        advances_px: dict[int, float] = {}
         hangul_monospace_used = False
         hangul_common_advance: int | None = None
+        hangul_common_advance_px: float | None = None
 
         # Hangul fast-path: if the Syllables block is monospace, measure
         # one syllable and replicate to the other 11,171.
@@ -313,6 +326,7 @@ def extract_via_render(
                     backend, size_px=size_px)
                 if is_mono and common_px is not None:
                     hangul_monospace_used = True
+                    hangul_common_advance_px = common_px
                     hangul_common_advance = pixel_to_unit(
                         common_px, size_px=size_px, upem=upem_used)
                     # Replicate ADVANCE across the block. LSB is per-syllable
@@ -334,6 +348,7 @@ def extract_via_render(
                             advanceWidth=hangul_common_advance,
                             lsb=lsb_units,
                         )
+                        advances_px[cp] = common_px
                     cmap_to_measure = other_cps
                 else:
                     cmap_to_measure = cmap
@@ -358,8 +373,24 @@ def extract_via_render(
                          if lsb_px is not None else None)
             glyphs[codepoint_to_id(cp)] = GlyphMetric(
                 advanceWidth=adv_units, lsb=lsb_units)
+            advances_px[cp] = adv_px
             if progress and (i + 1) % 500 == 0:
                 print(f"  ... {i + 1}/{len(cmap_to_measure)} glyphs measured")
+
+    # P4: kerning pair extraction (opt-in, runs after the backend
+    # `with` block since the kerning module opens its own HarfBuzz
+    # font handle independent of the render backend)
+    kerning: list[KerningPair] | None = None
+    if include_kerning and not skip_kerning:
+        if pair_candidates is None:
+            pair_candidates = default_pair_candidates(cmap=cmap)
+        if progress:
+            print(f"  measuring {len(pair_candidates)} kerning pairs...")
+        kerning = extract_kerning_pairs(
+            font_path, pair_candidates,
+            threshold_units=kern_threshold_units,
+            progress=progress,
+        )
 
     global_metrics = GlobalMetrics(
         unitsPerEm=upem_used,
@@ -386,5 +417,6 @@ def extract_via_render(
         source=source,
         global_metrics=global_metrics,
         glyphs=glyphs,
+        kerning=kerning,
     )
     return spec
