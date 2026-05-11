@@ -434,12 +434,22 @@ def extract_metrics(
                    "full kerning coverage on fonts with class-based GPOS "
                    "pairs (e.g. CJK fonts with 20K+ pairs). --backend "
                    "render only.")
+@click.option("--unnamed-from", "unnamed_from",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help="Copy advance + LSB + kerning numerics for glyphs that "
+                   "aren't reachable via cmap (notdef variants, ligatures, "
+                   "mark glyphs, etc.) from this font. Required to reach "
+                   "100% metric coverage on fonts whose source font has "
+                   "1000+ unnamed glyphs. Numeric only — no outlines. "
+                   "--backend render only.")
 @click.option("--full-reference", "full_reference",
               type=click.Path(exists=True, dir_okay=False, path_type=Path),
               default=None,
-              help="Shorthand for both --metadata-from and --pair-list-from "
-                   "pointing at the same font. The conventional way to ask "
-                   "for full-fidelity render extraction.")
+              help="Shorthand for --metadata-from + --pair-list-from + "
+                   "--unnamed-from pointing at the same font. The "
+                   "conventional way to ask for full-fidelity render "
+                   "extraction.")
 @click.option("--update-spec", "update_spec",
               type=click.Path(exists=True, dir_okay=False, path_type=Path),
               default=None,
@@ -480,6 +490,7 @@ def extract_metrics(
 def extract_cmd(font: Path, output: Path | None, backend: str, renderer: str,
                 render_size: int, detect_monospace: bool, workdir: Path | None,
                 metadata_from: Path | None, pair_list_from: Path | None,
+                unnamed_from: Path | None,
                 full_reference: Path | None,
                 update_spec: Path | None,
                 refresh_cmap: str | None,
@@ -518,6 +529,7 @@ def extract_cmd(font: Path, output: Path | None, backend: str, renderer: str,
             workdir=workdir,
             metadata_from=metadata_from,
             pair_list_from=pair_list_from,
+            unnamed_from=unnamed_from,
             full_reference=full_reference,
             update_spec=update_spec,
             refresh_cmap=refresh_cps,

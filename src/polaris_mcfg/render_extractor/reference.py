@@ -51,7 +51,12 @@ def load_metadata_flags(font_path: str | Path) -> dict[str, dict[str, Any]]:
     """
     from fontTools.ttLib import TTFont
 
-    METADATA_HEAD = ("unitsPerEm", "macStyle", "flags")
+    # head.flags is intentionally NOT copied. fontTools rewrites the
+    # LSB-at-x=0 bit (bit 1) at save time based on the actual glyph
+    # outlines in the design font — so copying the source's flags is
+    # a "lie" that gets silently corrected. Other head fields are
+    # numeric labels that survive round-trip.
+    METADATA_HEAD = ("unitsPerEm", "macStyle")
     METADATA_HHEA = ("ascent", "descent", "lineGap",
                      "caretSlopeRise", "caretSlopeRun", "caretOffset")
     METADATA_OS2 = (
@@ -122,6 +127,79 @@ def load_pair_list(font_path: str | Path) -> list[tuple[int, int]]:
                     out.append((left_cp, right_cp))
             except ValueError:
                 continue
+        return out
+    finally:
+        font.close()
+
+
+def load_unnamed_glyph_metrics(
+    font_path: str | Path,
+) -> dict[str, dict[str, int | None]]:
+    """Read per-glyph advance + LSB for glyphs that aren't in any cmap.
+
+    These are the synthetic glyphs in a font that no codepoint maps to:
+    ``.notdef`` variants, ligatures, alternate forms, OpenType
+    substitution targets, mark glyphs, etc. They have glyph names
+    (e.g. ``"glyph22507"``, ``"f_f_i"``) but no codepoint, so the render
+    extractor cannot reach them — no text input produces them.
+
+    Returns a dict shaped like::
+
+        {"glyph#glyph22507": {"advanceWidth": 577, "lsb": 50},
+         "glyph#f_f_i":      {"advanceWidth": 1500, "lsb": 23},
+         ...}
+
+    Same numeric-only nature as :func:`load_pair_list` — we read the
+    advance/LSB integers but never the outlines.
+    """
+    from fontTools.ttLib import TTFont
+
+    font = TTFont(str(font_path), lazy=True)
+    try:
+        cmap = font.getBestCmap() or {}
+        cmapped_names = set(cmap.values())
+        hmtx = font["hmtx"]
+        out: dict[str, dict[str, int | None]] = {}
+        for gname, (advance, lsb) in hmtx.metrics.items():
+            if gname in cmapped_names:
+                continue  # skip glyphs reachable by codepoint
+            out[f"glyph#{gname}"] = {
+                "advanceWidth": int(advance),
+                "lsb": int(lsb),
+            }
+        return out
+    finally:
+        font.close()
+
+
+def load_unnamed_glyph_kerning_pairs(
+    font_path: str | Path,
+) -> list[tuple[str, str, int]]:
+    """Read kerning pairs where at least one side is an unnamed glyph.
+
+    Returns ``[(left_id, right_id, value), ...]`` with full values (not
+    just the tuple list). For pairs of cmapped glyphs use
+    :func:`load_pair_list` instead and let the render backend re-shape.
+
+    Required for fonts whose source kerning includes pairs against
+    unnamed glyphs (notdef-variant pairs, mark-positioning pairs, etc.)
+    — the render extractor cannot reach those glyphs to re-shape, so
+    the numeric value must be copied directly.
+    """
+    from fontTools.ttLib import TTFont
+
+    from ..extractor import _build_glyph_id_map, _extract_kerning
+
+    font = TTFont(str(font_path), lazy=True)
+    try:
+        id_of = _build_glyph_id_map(font)
+        kp = _extract_kerning(font, id_of)
+        out: list[tuple[str, str, int]] = []
+        for pair in kp:
+            # We want pairs where at least one side is unnamed (= not
+            # reachable via codepoint).
+            if pair.left.startswith("glyph#") or pair.right.startswith("glyph#"):
+                out.append((pair.left, pair.right, int(pair.value)))
         return out
     finally:
         font.close()

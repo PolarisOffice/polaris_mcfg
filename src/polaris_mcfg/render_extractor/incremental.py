@@ -64,10 +64,22 @@ def merge_specs(base: MetricsSpec, overlay: MetricsSpec) -> MetricsSpec:
 
     Returns a new ``MetricsSpec``.
     """
-    # source: overlay wins per-key, base values preserved otherwise
+    # source: overlay wins per-key, base values preserved otherwise.
+    # Build a small history trail so callers can see what produced
+    # this spec.
+    import datetime as _dt
     merged_source = dict(base.source)
     merged_source.update(overlay.source)
     merged_source["mergedFromBase"] = True
+    history = list(base.source.get("updateHistory", []))
+    history.append({
+        "at": _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"),
+        "overlayCmapSize": len(overlay.glyphs),
+        "overlayKerningPairs": len(overlay.kerning or []),
+        "overlayShaped": len(overlay.shaped_advances or []),
+    })
+    merged_source["updateHistory"] = history
 
     # glyphs: overlay wins per-glyph
     merged_glyphs: dict[str, GlyphMetric] = dict(base.glyphs)

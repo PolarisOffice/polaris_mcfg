@@ -271,3 +271,30 @@ def test_refresh_without_update_spec_raises(tmp_path: Path) -> None:
             font, renderer="freetype",
             refresh_cmap=[0x1000],
         )
+
+
+def test_update_history_records_overlay_summary(tmp_path: Path) -> None:
+    """Each merge appends an entry to source.updateHistory so callers
+    can trace what fed into the spec."""
+    from polaris_mcfg.render_extractor import extract_via_render
+
+    font = _build_font(tmp_path / "f.ttf", n_glyphs=5)
+    spec_v1 = extract_via_render(
+        font, renderer="freetype",
+        cmap=[0x1000, 0x1001],
+        include_lsb=True,
+    )
+    v1_path = tmp_path / "v1.json"
+    v1_path.write_text(spec_v1.to_json())
+
+    spec_v2 = extract_via_render(
+        font, renderer="freetype",
+        cmap=[0x1002],
+        include_lsb=True,
+        update_spec=v1_path,
+    )
+    hist = spec_v2.source.get("updateHistory")
+    assert hist is not None
+    assert len(hist) == 1
+    assert hist[0]["overlayCmapSize"] == 1
+    assert "at" in hist[0]

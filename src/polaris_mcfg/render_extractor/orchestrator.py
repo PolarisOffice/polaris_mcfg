@@ -47,6 +47,8 @@ from .incremental import expand_refresh_set, load_spec, merge_specs
 from .reference import (
     load_metadata_flags,
     load_pair_list,
+    load_unnamed_glyph_kerning_pairs,
+    load_unnamed_glyph_metrics,
     merge_metadata_into_globals,
 )
 from .shaped import DEFAULT_SHAPING_CONTEXTS, extract_shaped_advances
@@ -355,6 +357,7 @@ def extract_via_render(
     workdir: str | Path | None = None,
     metadata_from: str | Path | None = None,
     pair_list_from: str | Path | None = None,
+    unnamed_from: str | Path | None = None,
     full_reference: str | Path | None = None,
     update_spec: str | Path | None = None,
     refresh_cmap: list[int] | None = None,
@@ -396,6 +399,8 @@ def extract_via_render(
             metadata_from = full_reference
         if pair_list_from is None:
             pair_list_from = full_reference
+        if unnamed_from is None:
+            unnamed_from = full_reference
 
     # Incremental update mode: load the base spec; if refresh_* is set,
     # restrict cmap to just the codepoints we want to re-measure. The
@@ -553,7 +558,20 @@ def extract_via_render(
         if pair_list_from is not None:
             ref_pairs = load_pair_list(pair_list_from)
             existing = {(p.left, p.right) for p in pair_candidates}
+            # During incremental refresh (cmap is restricted), the
+            # base spec already covers most of the font's cmap — we
+            # need to consider the union of the current measurement
+            # cmap and the base spec's cmap so that pair candidates
+            # outside the refresh subset (e.g., Cyrillic kerning pairs
+            # when refreshing Halfwidth) aren't accidentally dropped.
             cmap_set = set(cmap)
+            if base_spec is not None:
+                for gid in base_spec.glyphs:
+                    if gid.startswith("U+"):
+                        try:
+                            cmap_set.add(int(gid[2:], 16))
+                        except ValueError:
+                            pass
             for (l, r) in ref_pairs:
                 if l not in cmap_set or r not in cmap_set:
                     continue
@@ -605,6 +623,29 @@ def extract_via_render(
         source["metadataReference"] = str(Path(metadata_from).name)
     if pair_list_from is not None:
         source["pairListReference"] = str(Path(pair_list_from).name)
+    # Unnamed glyph numeric copy (advance + LSB + kerning involving
+    # them). These are font-internal glyphs no codepoint maps to, so
+    # the render extractor cannot reach them through text rendering.
+    # The values are still numeric only — no outlines.
+    unnamed_added = 0
+    unnamed_kern_added = 0
+    if unnamed_from is not None:
+        unnamed = load_unnamed_glyph_metrics(unnamed_from)
+        for gid, gm in unnamed.items():
+            if gid not in glyphs:
+                glyphs[gid] = GlyphMetric(
+                    advanceWidth=int(gm["advanceWidth"]),
+                    lsb=(int(gm["lsb"]) if include_lsb else None),
+                )
+                unnamed_added += 1
+        if include_kerning and kerning is not None:
+            existing_pairs = {(p.left, p.right) for p in kerning}
+            for (l, r, v) in load_unnamed_glyph_kerning_pairs(unnamed_from):
+                if (l, r) in existing_pairs:
+                    continue
+                kerning.append(KerningPair(left=l, right=r, value=v))
+                unnamed_kern_added += 1
+
     spec = MetricsSpec(
         source=source,
         global_metrics=global_metrics,
@@ -612,7 +653,6 @@ def extract_via_render(
         kerning=kerning,
         shaped_advances=shaped_advances,
     )
-
     # Incremental: merge the freshly-measured overlay onto the base
     # spec. Base entries (codepoints we didn't re-measure, pairs we
     # didn't re-shape, etc.) carry through. Overlay wins on overlap.
@@ -621,4 +661,40 @@ def extract_via_render(
         spec.source["updateBase"] = str(Path(update_spec).name)
         if refresh_set is not None:
             spec.source["refreshedCodepoints"] = len(refresh_set)
+
+    # Fill in LSB for cmap glyphs whose render measurement returned
+    # None — whitespace (no ink), raster-overflow skips, and any
+    # other glyph the render extractor couldn't measure. This runs
+    # after the merge so it sees both base and overlay glyph LSBs.
+    # Numeric only — no outlines.
+    cmap_filled = 0
+    if unnamed_from is not None and include_lsb:
+        from fontTools.ttLib import TTFont
+        ref = TTFont(str(unnamed_from), lazy=True)
+        try:
+            ref_cmap = ref.getBestCmap() or {}
+            ref_hmtx = ref["hmtx"]
+            for cp, gname in ref_cmap.items():
+                gid = codepoint_to_id(cp)
+                cur = spec.glyphs.get(gid)
+                if cur is None or cur.lsb is not None:
+                    continue
+                if gname not in ref_hmtx.metrics:
+                    continue
+                _adv, lsb = ref_hmtx.metrics[gname]
+                spec.glyphs[gid] = GlyphMetric(
+                    advanceWidth=cur.advanceWidth,
+                    lsb=int(lsb),
+                )
+                cmap_filled += 1
+        finally:
+            ref.close()
+
+    if unnamed_added or unnamed_kern_added or cmap_filled:
+        spec.source["unnamedReference"] = {
+            "file": str(Path(unnamed_from).name),
+            "glyphsAdded": unnamed_added,
+            "cmapLsbFilled": cmap_filled,
+            "kerningPairsAdded": unnamed_kern_added,
+        }
     return spec
