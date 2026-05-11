@@ -83,12 +83,55 @@ EULA가 file parsing("metric extraction" / "reverse engineering")을 명시
 
 ### 1.4 우리 도구의 모드별 매핑
 
-| 모드 | 사용 영역 | EULA 위치 | 복원율 |
-|---|---|---|---:|
-| `--pixel-only` (FreeType) | 영역 A의 픽셀만 | EULA 안전. FreeType 단독은 GPOS 안 보므로 kerning 손실 | ~80% |
-| (기본, `--include-kerning` 등) | 영역 A 의 픽셀 + HB shape | EULA 안전 — 정상 rendering 의 일부 | ~90% |
-| `--pair-list-from FILE` / `--unnamed-from` / `--metadata-from` | 영역 A + B의 일부 | EULA 위험 — internal table 추출. 엄격한 EULA 시 위반 | ~100% |
-| `--backend file` | 전체 영역 B | EULA 가장 약 | 100% |
+페어 list 읽기와 HB shape 는 **완전히 별개의 행위**임을 명확히:
+
+| 모드 | Pair 후보 출처 | Pair 값 측정 방법 | 영역 | 복원율 |
+|---|---|---|---|---:|
+| `--pixel-only` (FreeType) | (안 함) | (불가 — HB shape 비활성, FreeType 가 GPOS 안 봄) | A 만 | ~80% |
+| 기본 (`--include-kerning`) | **하드코딩 휴리스틱** (`kerning.py` 의 `ASCII_PRINTABLE` × `KOREAN_PUNCT`) | HB shape | A 만 | ~90% (Latin 위주) |
+| `--pair-list-from FILE` | **폰트 file 의 `kern` + `GPOS PairPos` internal lookup** | HB shape | A + B | ~100% |
+| `--unnamed-from FILE` / `--metadata-from FILE` | (n/a) | n/a | B | unnamed + metadata 추가 |
+| `--backend file` | 전체 file parsing | 전체 file parsing | B | 100% |
+
+> **결정적 통찰**:
+> - "페어 list 를 폰트에서 읽음" = `--pair-list-from` 일 때만 (영역 B)
+> - "HB shape 호출" = 기본 모드의 kerning 측정 메커니즘 (영역 A)
+> - 두 행위는 독립적. 기본 모드는 페어 list 읽지 않으면서도 HB shape 로 휴리스틱 후보의 값을 측정.
+
+### 1.4.1 기본 모드의 정확한 동작
+
+```python
+# 기본 모드에서 kerning=True 일 때 (`extract_via_render` 호출 흐름):
+
+# 1. 후보 enumeration (영역 A — 우리 코드의 휴리스틱)
+ASCII = list(range(0x21, 0x7F))           # 하드코딩
+KOREAN_PUNCT = [0x3001, 0x3002, ...]       # 하드코딩
+candidates = (
+    ASCII × ASCII +                         # 8,836 후보
+    ASCII × KOREAN_PUNCT +                  # 1,410
+    KOREAN_PUNCT × ASCII                    # 1,410
+)                                          # 합 ~11,656
+
+# 2. 각 후보의 값 측정 (영역 A — HB shape)
+for (l, r) in candidates:
+    shaped = hb.shape([l, r], font)         # HB 내부에서 GPOS lookup
+    kern = sum(shaped.x_advance) - (adv_l + adv_r)
+    if abs(kern) >= threshold:
+        keep
+```
+
+- 1단계의 후보 list 는 폰트와 무관한 휴리스틱
+- 2단계의 HB shape 는 폰트 file 을 *내부적으로* 읽지만 우리에게는 **rendering 결과** (positioning numeric) 만 줌
+- 폰트의 internal pair list (어떤 페어가 정의되어 있는지) 는 **우리 코드가 알 길 없음** — 그저 우리 휴리스틱 후보가 폰트에 정의된 페어와 우연히 겹치면 0 이 아닌 값이 나옴
+
+### 1.4.2 휴리스틱의 한계
+
+기본 모드의 ~90% 복원율은 **휴리스틱이 보통 폰트의 페어 분포와 일치한다는 가정** 에 기반:
+- 라틴 폰트: 페어 거의 다 ASCII × ASCII → 휴리스틱이 잘 잡음
+- CJK 폰트: 라틴 × 한국어 구두점, 한자 × 한자 페어 일부 → 휴리스틱이 부분만 잡음 (Cyrillic, Hebrew, Arabic 페어는 누락)
+- 특이한 페어 분포 폰트 (예: 라틴 × 한자 페어): 휴리스틱 완전히 빗나감 → 0% 복원
+
+이 한계를 채우려면 `--pair-list-from FILE` 로 폰트의 실제 pair list 를 받아옴 (영역 B 진입).
 
 ### 1.5 행위별 매트릭스
 

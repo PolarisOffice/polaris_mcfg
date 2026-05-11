@@ -91,14 +91,20 @@ mcfg --help
 
 ### 4가지 모드 매트릭스
 
-| 모드 | 사용하는 영역 | EULA 위치 | 메트릭 복원율 |
-|---|---|---|---:|
-| `--pixel-only` (FreeType) | 픽셀 측정만 | **영역 A**. 다만 FreeType 단독은 GPOS 적용 안 함 → kerning 손실 | ~80% |
-| (기본, `--include-kerning` 등) | 픽셀 + HarfBuzz shape | **영역 A**. HB shape 는 정상 rendering 의 일부 — Chrome, Firefox, OS 가 매일 호출 | ~90% |
-| `--pair-list-from` / `--unnamed-from` / `--metadata-from` | + file internal table 분석 | **영역 B** — reverse engineering 영역. EULA 가 명시 금지 시 위반 | ~100% |
-| `--backend file` | 전체 file parsing | 영역 B 의 가장 강한 형태 | 100% (정수 정확) |
+| 모드 | Pair 후보 enumeration | Pair 값 측정 | 사용 영역 | 복원율 |
+|---|---|---|---|---:|
+| `--pixel-only` (FreeType) | (시도 안 함) | (불가 — HB shape 비활성, FreeType 가 GPOS 안 봄) | **영역 A** | ~80% |
+| (기본, `--include-kerning`) | **하드코딩 휴리스틱** (~11.6K, ASCII × ASCII + ASCII × Korean punct) | HB shape | **영역 A** | ~90% (Latin 위주) |
+| `--pair-list-from FILE` | **폰트 file 의 internal lookup** (~20K, 전체 페어) | HB shape | 영역 A + **영역 B** (페어 list 추출) | ~100% |
+| `--unnamed-from FILE` / `--metadata-from FILE` | (kerning 무관) | n/a | **영역 B** (internal table 추출) | +unnamed / +metadata |
+| `--backend file` | 전체 file parsing | 전체 file parsing | 전체 **영역 B** | 100% (정수 정확) |
 
-> **핵심 정정**: HB shape 자체는 정상 rendering 의 일부로 EULA 안전 영역에 있습니다. 결정적 EULA 위험은 `--pair-list-from` / `--unnamed-from` / `--metadata-from` / `--backend file` 처럼 **rendering 출력 외의 internal table 데이터를 직접 추출하는 행위**입니다.
+> **핵심 — 페어 list 읽기 vs HB shape 는 완전히 다른 행위**:
+> - 기본 모드는 **페어 list 를 읽지 않습니다**. 후보는 우리 코드의 하드코딩 휴리스틱이고, HB shape 로 각 후보의 값만 측정합니다.
+> - `--pair-list-from FILE` 만이 폰트 file 의 internal pair list 를 추출합니다 (영역 B).
+> - `--pixel-only` 와 기본의 차이는 **HB shape 호출 여부**입니다 (페어 list 읽기 여부 아님).
+
+> **HB shape 자체는 정상 rendering 의 일부**로 EULA 안전 영역. 결정적 EULA 위험은 `--pair-list-from` / `--unnamed-from` / `--metadata-from` / `--backend file` 처럼 **rendering 출력 외의 internal table 데이터를 직접 추출하는 행위**입니다.
 
 **권장 사용**:
 
