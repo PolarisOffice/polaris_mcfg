@@ -178,6 +178,7 @@ GSUB 처리 (`--apply gsub` 시):
 | **R7** | `scale_upem` Chromium 호환성 추적 — fontTools 또는 OTS 업스트림 이슈 작성, 가능 시 우회 patch | TTF 출력 사용성 | 중 |
 | **R8** | TTC 입력 지원 (`--ttc-index`) | 일반 시스템 폰트 진입 장벽 | 소 |
 | **R-ux1** | CLI 진단 모드 (`mcfg doctor <font>`) — 어떤 lookup이 들어있고 본 도구가 무엇을 다룰 수 있는지 한눈에 보고 | 신규 사용자 온보딩 | 소 |
+| **R-render** | Render-based extractor (M8): EULA가 file parsing을 금지한 폰트를 위해, 폰트를 정상 렌더링한 결과 이미지에서 메트릭을 측정해 복원. FreeType / 브라우저 백엔드. 정확도 ±1~2 unit. → [docs/design/12-render-extractor.md](docs/design/12-render-extractor.md) | 라이센스 회피 우회로 확보 | 중-상 |
 
 ### v0.4 — 중기 (3~6개월)
 

@@ -32,7 +32,29 @@ dependencies = [
 
 [project.optional-dependencies]
 render = ["uharfbuzz>=0.39"]
-dev = ["pytest>=7", "uharfbuzz>=0.39"]
+# Render-based extractor (M8): pixel-measurement of rendered glyphs.
+# - `render-extract`: FreeType backend (file-parsing happens inside FT,
+#   not in our code; ±1 unit accuracy).
+# - `render-extract-browser`: Playwright-based browser backend (strongest
+#   EULA defense — we never open the font file ourselves; the browser does
+#   under @font-face).
+render-extract = [
+    "freetype-py>=2.4",
+    "Pillow>=10.0",
+    "numpy>=1.26",
+]
+render-extract-browser = [
+    "playwright>=1.40",
+    "Pillow>=10.0",
+    "numpy>=1.26",
+]
+dev = [
+    "pytest>=7",
+    "uharfbuzz>=0.39",
+    "freetype-py>=2.4",
+    "Pillow>=10.0",
+    "numpy>=1.26",
+]
 
 [project.scripts]
 mcfg = "polaris_mcfg.cli:main"
