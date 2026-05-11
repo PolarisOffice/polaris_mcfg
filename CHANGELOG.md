@@ -2,6 +2,59 @@
 
 All notable changes to Polaris MCFG.
 
+## [0.3.3] — 2026-05-11 — pixel-only mode + EULA layer documentation
+
+Adds the strictest-EULA mode for fonts whose license explicitly forbids
+metric extraction or reverse engineering, plus honest documentation of
+where each layer of the render extractor sits on the reverse-engineering
+spectrum.
+
+### Added
+
+- **`--pixel-only`** (`--backend render` only): force-disables every
+  layer that touches the font file outside the rendering pipeline:
+  - HarfBuzz `shape()` calls (kerning + shaped advance recovery)
+  - `--metadata-from` / `--pair-list-from` / `--unnamed-from` /
+    `--full-reference` (file-backend numeric copy)
+
+  Result: pure pixel measurement only. ~80% metric coverage (advance +
+  LSB + vertical + italic angle + underline). Kerning and shaped
+  advance are lost — that's the cost of being truly EULA-strictest.
+
+  Conflicting options become `spec.source.pixelOnlyDisabled` markers
+  so callers can see what got suppressed.
+
+### Documentation
+
+- **README** §"EULA 강도별 4가지 모드" — practical-100% matrix listing
+  the four modes (`--pixel-only` / default / `--full-reference` /
+  `--backend file`) with recovery rate, EULA position, and recommended
+  usage by font category.
+- **README** § "Render 백엔드 옵션 매트릭스" — full option reference.
+- **README** § "Incremental 업데이트" — workflow examples (refresh-block,
+  refresh-cmap, update-spec accumulation).
+- **README** § "CJK 폰트 fast-path" — monospace block detection summary.
+- **README** § "실측 정확도 — NotoSansKR-Bold" — actual numbers from
+  full-cmap end-to-end (100% advance, 99.94% LSB, 99.94% kerning).
+- **`docs/design/12-render-extractor.md`** §1 fully rewritten — layer-
+  by-layer honest discussion of where HB shape, file numeric copy,
+  and pixel measurement sit on the reverse-engineering spectrum.
+  **Explicitly states that HB shape and file numeric copy can both be
+  classified as reverse engineering under strict EULA interpretation**,
+  even though we never extract outlines. `--pixel-only` is the only
+  truly EULA-strictest path.
+
+### Tests
+
+145 → 150 (+5 in P10):
+- `pixel_only` suppresses `include_kerning`
+- `pixel_only` suppresses `include_shaped`
+- `pixel_only` suppresses every `*_from` option
+- advance + LSB + vertical still captured under `pixel_only`
+- `pixelOnlyDisabled` marker absent when no conflicts
+
+---
+
 ## [0.3.2] — 2026-05-11 — practical-100% reference helpers + CJK fast-path
 
 Closes the small gap between what the render extractor can recover from
