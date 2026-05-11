@@ -412,6 +412,11 @@ def extract_metrics(
               default=True,
               help="Disable the Hangul-monospace fast-path "
                    "(--backend render only).")
+@click.option("--workdir", type=click.Path(file_okay=False, path_type=Path),
+              default=None,
+              help="Dump each rendered probe to this directory as PNG "
+                   "(--backend render only). Useful for debugging / "
+                   "verifying which images the extractor actually measured.")
 @click.option("--include-lsb", is_flag=True, help="Include left side bearings.")
 @click.option("--include-kerning", is_flag=True,
               help="Include kerning pairs (file: kern + GPOS PairPos; "
@@ -430,9 +435,10 @@ def extract_metrics(
               help="Fix volatile fields (timestamp) for reproducible output.")
 @click.option("--indent", type=int, default=2, show_default=True)
 def extract_cmd(font: Path, output: Path | None, backend: str, renderer: str,
-                render_size: int, detect_monospace: bool, include_lsb: bool,
-                include_kerning: bool, include_vertical: bool,
-                include_gsub: bool, include_shaped: bool,
+                render_size: int, detect_monospace: bool, workdir: Path | None,
+                include_lsb: bool, include_kerning: bool,
+                include_vertical: bool, include_gsub: bool,
+                include_shaped: bool,
                 deterministic: bool, indent: int) -> None:
     include_shaped_combined = include_gsub or include_shaped
     if backend == "render":
@@ -446,6 +452,7 @@ def extract_cmd(font: Path, output: Path | None, backend: str, renderer: str,
             include_kerning=include_kerning,
             include_vertical=include_vertical,
             include_shaped=include_shaped_combined,
+            workdir=workdir,
         )
     else:
         spec = extract_metrics(

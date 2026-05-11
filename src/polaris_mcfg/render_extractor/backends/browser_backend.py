@@ -109,8 +109,9 @@ class BrowserBackend(RenderBackend):
 
     name = "browser"
 
-    def __init__(self, font_path: str | Path) -> None:
-        super().__init__(font_path)
+    def __init__(self, font_path: str | Path,
+                 workdir: str | Path | None = None) -> None:
+        super().__init__(font_path, workdir=workdir)
         self._pw_ctx = None  # Playwright context manager
         self._pw = None
         self._browser = None
@@ -164,7 +165,7 @@ class BrowserBackend(RenderBackend):
         # canonical 1000-UPM frame.
         return None
 
-    def render(self, request: RenderRequest) -> RenderResult:
+    def _do_render(self, request: RenderRequest) -> RenderResult:
         if self._page is None:
             raise RuntimeError("BrowserBackend not opened. Use as a context "
                                "manager: `with BrowserBackend(...) as be:`.")

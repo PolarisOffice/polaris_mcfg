@@ -39,8 +39,9 @@ class FreeTypeBackend(RenderBackend):
 
     name = "freetype"
 
-    def __init__(self, font_path: str | Path) -> None:
-        super().__init__(font_path)
+    def __init__(self, font_path: str | Path,
+                 workdir: str | Path | None = None) -> None:
+        super().__init__(font_path, workdir=workdir)
         self._face = None
         self._face_index = 0  # First face in a .ttc (M8 doesn't iterate)
 
@@ -78,7 +79,7 @@ class FreeTypeBackend(RenderBackend):
             )
         return flags
 
-    def render(self, request: RenderRequest) -> RenderResult:
+    def _do_render(self, request: RenderRequest) -> RenderResult:
         if self._face is None:
             raise RuntimeError("FreeTypeBackend not opened. Use as a context "
                                "manager: `with FreeTypeBackend(...) as be:`.")

@@ -58,29 +58,33 @@ HANGUL_MONOSPACE_PROBES = ("가", "뷁", "이", "왈")
 HANGUL_SYLLABLES_RANGE = range(0xAC00, 0xD7A4)
 
 
-def _open_backend(font_path: Path, renderer: str) -> RenderBackend:
+def _open_backend(font_path: Path, renderer: str,
+                  workdir: Path | None = None) -> RenderBackend:
     """Pick and instantiate a backend.
 
     ``renderer`` values:
         - ``"freetype"``: always pick FreeType (raises if unavailable).
         - ``"browser"``: always pick Playwright browser (raises if unavailable).
         - ``"auto"``: try FreeType first, then browser.
+
+    ``workdir``: if given, the backend dumps each render's PNG into it
+    (one PNG per backend.render() call).
     """
     if renderer == "freetype":
         from .backends.freetype_backend import FreeTypeBackend
-        return FreeTypeBackend(font_path)
+        return FreeTypeBackend(font_path, workdir=workdir)
     if renderer == "browser":
         from .backends.browser_backend import BrowserBackend  # noqa: F401
-        return BrowserBackend(font_path)  # type: ignore[name-defined]
+        return BrowserBackend(font_path, workdir=workdir)  # type: ignore[name-defined]
     if renderer == "auto":
         try:
             from .backends.freetype_backend import FreeTypeBackend
-            return FreeTypeBackend(font_path)
+            return FreeTypeBackend(font_path, workdir=workdir)
         except Exception:
             pass
         try:
             from .backends.browser_backend import BrowserBackend
-            return BrowserBackend(font_path)
+            return BrowserBackend(font_path, workdir=workdir)
         except Exception as e:
             raise RuntimeError(
                 "No render backend available. Install with "
@@ -268,6 +272,7 @@ def extract_via_render(
     kern_threshold_units: int = DEFAULT_KERN_THRESHOLD_UNITS,
     include_shaped: bool = False,
     shaping_contexts: tuple[tuple[str, str], ...] = DEFAULT_SHAPING_CONTEXTS,
+    workdir: str | Path | None = None,
 ) -> MetricsSpec:
     """Render-based extraction.
 
@@ -304,7 +309,7 @@ def extract_via_render(
     if max_glyphs is not None:
         cmap = cmap[:max_glyphs]
 
-    with _open_backend(font_path, renderer) as backend:
+    with _open_backend(font_path, renderer, workdir=Path(workdir) if workdir else None) as backend:
         reported_upem = backend.reported_upem()
         upem_used = reported_upem if reported_upem is not None else upem
 

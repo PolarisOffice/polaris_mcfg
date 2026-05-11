@@ -77,17 +77,27 @@ class RenderResult:
 class RenderBackend(ABC):
     """Abstract render backend.
 
-    Concrete backends must implement :meth:`render`. Backends are stateful
-    (they hold an open font handle) and used as context managers::
+    Concrete backends implement :meth:`_do_render`; the public
+    :meth:`render` wraps it with an optional PNG dump for debugging.
+    Backends are stateful (they hold an open font handle) and used as
+    context managers::
 
         with FreeTypeBackend(font_path) as be:
             result = be.render(RenderRequest(text="HHHH"))
+
+    Pass ``workdir`` to dump each render's image to disk::
+
+        with FreeTypeBackend(font_path, workdir="/tmp/renders") as be:
+            be.render(...)   # writes 0001_AAAA_1000.png etc.
     """
 
     name: str = "base"
 
-    def __init__(self, font_path: str | Path) -> None:
+    def __init__(self, font_path: str | Path,
+                 workdir: str | Path | None = None) -> None:
         self.font_path = Path(font_path)
+        self.workdir = Path(workdir) if workdir else None
+        self._render_seq = 0
 
     def __enter__(self) -> "RenderBackend":
         self.open()
@@ -102,9 +112,18 @@ class RenderBackend(ABC):
     def close(self) -> None:  # pragma: no cover - default no-op
         pass
 
-    @abstractmethod
     def render(self, request: RenderRequest) -> RenderResult:
-        """Rasterize the request and return the result."""
+        """Rasterize ``request``. Wraps ``_do_render`` with optional disk dump.
+
+        Subclasses should implement :meth:`_do_render`, not this method.
+        """
+        result = self._do_render(request)
+        self._maybe_dump(request, result)
+        return result
+
+    @abstractmethod
+    def _do_render(self, request: RenderRequest) -> RenderResult:
+        """Backend-specific rasterization."""
 
     @abstractmethod
     def reported_upem(self) -> int | None:
@@ -114,3 +133,31 @@ class RenderBackend(ABC):
         this is generally not available (returns None) and must be
         inferred by the analyzer.
         """
+
+    def _maybe_dump(self, request: RenderRequest,
+                    result: RenderResult) -> None:
+        """If ``workdir`` is set, write the result image as a PNG.
+
+        Filename pattern: ``NNNN_{tag}_{size}.png`` where NNNN is the
+        per-backend render sequence and ``{tag}`` encodes the rendered
+        text as ``U+XXXX`` joined by underscores (truncated to 8 chars
+        of text for filesystem sanity).
+        """
+        if self.workdir is None:
+            return
+        self.workdir.mkdir(parents=True, exist_ok=True)
+        self._render_seq += 1
+        text_preview = request.text[:8]
+        tag = "_".join(f"U+{ord(c):04X}" for c in text_preview)
+        name = f"{self._render_seq:04d}_{tag}_{request.size_px}.png"
+        try:
+            from PIL import Image
+        except ImportError:  # pragma: no cover
+            return
+        # The backend image is uint8 with 0=blank and 255=ink. Invert so
+        # the saved PNG is the conventional "black text on white".
+        import numpy as np  # local import to avoid hard dep on import time
+        if result.image.size == 0:
+            return
+        img = Image.fromarray(255 - result.image.astype(np.uint8))
+        img.save(self.workdir / name)
