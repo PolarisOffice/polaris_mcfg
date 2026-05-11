@@ -2,6 +2,74 @@
 
 All notable changes to Polaris MCFG.
 
+## [0.3.2] — 2026-05-11 — practical-100% reference helpers + CJK fast-path
+
+Closes the small gap between what the render extractor can recover from
+pixels alone and byte-for-byte equivalence with the file backend on
+production CJK fonts.
+
+### Added — CLI options
+
+- `--metadata-from FILE`: copy classification flags from the source
+  font's head/hhea/OS-2/post tables (italicAngle, fsSelection,
+  usWeightClass, ulUnicodeRange, etc.). These are descriptive labels,
+  not metric values — analogous to a book's Library-of-Congress number.
+- `--pair-list-from FILE`: read the kerning pair tuple list (left/right
+  codepoints — values not read) from the source font's kern + GPOS, and
+  add them to the render-extractor's candidate set. Required to reach
+  full kerning coverage on fonts with class-based GPOS (e.g., 20K+
+  pairs in NotoSansKR).
+- `--full-reference FILE`: shorthand for both of the above pointing at
+  the same font. The conventional one-flag form.
+
+### Added — Generalized monospace fast-path
+
+The Hangul-syllable fast-path is now one of four blocks the orchestrator
+auto-detects:
+
+| Block | Range | NotoSansKR-Bold count |
+|---|---|---|
+| Hangul Syllables | U+AC00..U+D7A3 | 11,172 |
+| CJK Unified Ideographs | U+4E00..U+9FFF | 7,867 |
+| CJK Compatibility Ideographs | U+F900..U+FAFF | 510 |
+| Halfwidth/Fullwidth Forms | U+FF00..U+FFEF | 170 |
+
+Each block has 4 probe codepoints chosen for outline-shape diversity.
+A block that probes as uniform-advance gets the common value replicated
+to every codepoint in its range; LSB is still measured per-glyph
+(within a monospace advance block, ink positions differ).
+
+For NotoSansKR-Bold this turns ~25K advance probes into ~16 probes
+total — a >99.9% reduction.
+
+### Added — Reference module
+
+`polaris_mcfg.render_extractor.reference`:
+- `load_metadata_flags(path)` → head/hhea/os2/post dict
+- `load_pair_list(path)` → list of (left_cp, right_cp) tuples
+- `merge_metadata_into_globals(measured, metadata)` → merged globals
+
+### EULA discussion
+
+Both helpers read the source font's tables via fontTools — same path as
+the file backend — but read only:
+- classification flags (not metric values)
+- pair tuple list (not pair values)
+
+These are weaker EULA concerns than reading per-glyph metric values
+directly. Callers who must avoid the file entirely can skip these flags;
+the render-only extraction still works with the limitations documented
+in `docs/design/12-render-extractor.md` §10.
+
+### Tests
+
+125 → 133 (+8 in `tests/render_extractor/test_p8_full_reference.py`):
+- reference.py units (3)
+- orchestrator integration with each option (3)
+- MONOSPACE_BLOCKS list completeness + partition routing (2)
+
+---
+
 ## [0.3.1] — 2026-05-11 — generator bugfixes + render debug tooling
 
 ### Fixed (generator)
