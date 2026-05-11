@@ -91,13 +91,18 @@ mcfg --help
 
 ### 4가지 모드 매트릭스
 
-| 모드 | Pair 후보 enumeration | Pair 값 측정 | 사용 영역 | 복원율 |
-|---|---|---|---|---:|
-| `--pixel-only` (FreeType) | (시도 안 함) | (불가 — HB shape 비활성, FreeType 가 GPOS 안 봄) | **영역 A** | ~80% |
-| (기본, `--include-kerning`) | **하드코딩 휴리스틱** (~11.6K, ASCII × ASCII + ASCII × Korean punct) | HB shape | **영역 A** | ~90% (Latin 위주) |
-| `--pair-list-from FILE` | **폰트 file 의 internal lookup** (~20K, 전체 페어) | HB shape | 영역 A + **영역 B** (페어 list 추출) | ~100% |
-| `--unnamed-from FILE` / `--metadata-from FILE` | (kerning 무관) | n/a | **영역 B** (internal table 추출) | +unnamed / +metadata |
-| `--backend file` | 전체 file parsing | 전체 file parsing | 전체 **영역 B** | 100% (정수 정확) |
+| 모드 | Pair 후보 enumeration | Pair 값 측정 | 사용 영역 | Kerning 복원율 (CJK) | Kerning 복원율 (Latin) |
+|---|---|---|---|---:|---:|
+| `--pixel-only` (FreeType) | (시도 안 함) | (불가) | **영역 A** | 0% | 0% |
+| (기본, `--include-kerning`) | **하드코딩 휴리스틱** (~11.6K, ASCII × ASCII + ASCII × Korean punct) | HB shape | **영역 A** | **~5%** (NotoSansKR), **~0.3%** (Pretendard) | 70~95% |
+| `--pair-list-from FILE` | **폰트 file 의 internal lookup** (~20K-400K, 전체 페어) | HB shape | 영역 A + **영역 B** | ~100% | ~100% |
+| `--unnamed-from FILE` / `--metadata-from FILE` | (kerning 무관) | n/a | **영역 B** | +unnamed / +metadata | +unnamed / +metadata |
+| `--backend file` | 전체 file parsing | 전체 file parsing | 전체 **영역 B** | 100% (정수 정확) | 100% (정수 정확) |
+
+> **CJK 폰트는 휴리스틱으로 사실상 kerning 복원 불가**:
+> - NotoSansKR-Bold (총 20,997 페어): 휴리스틱이 1,038개 (5%) 만 겹침. 19.9K 는 한자-한자 클래스 페어, Hangul-Latin 크로스, Cyrillic 페어 — 휴리스틱이 가정한 ASCII 영역 밖.
+> - Pretendard (총 400K+ 페어, GPOS class kerning expanded): 휴리스틱 0.3% 만 겹침.
+> - **CJK 폰트의 kerning 을 제대로 복원하려면 `--pair-list-from` (영역 B) 사실상 필수**.
 
 > **핵심 — 페어 list 읽기 vs HB shape 는 완전히 다른 행위**:
 > - 기본 모드는 **페어 list 를 읽지 않습니다**. 후보는 우리 코드의 하드코딩 휴리스틱이고, HB shape 로 각 후보의 값만 측정합니다.
@@ -171,6 +176,8 @@ mcfg extract source.ttf --backend render \
 
 ### 실측 정확도 — NotoSansKR-Bold (전체 cmap)
 
+`--full-reference source.ttf` 사용 시 (영역 A + 영역 B 모두 활용):
+
 | 메트릭 | 매치 비율 | 비고 |
 |---|---:|---|
 | `font_loadable` | ✓ | — |
@@ -183,6 +190,13 @@ mcfg extract source.ttf --backend render \
 | `global_metrics` | 10/11 fields | head.flags 만 fontTools 자동 재계산 |
 
 전체 분석 시간: **render extract 37분 + incremental Halfwidth 30초 + unnamed copy 0.5초**.
+
+`--full-reference` 없이 기본 모드 (영역 A 만, EULA-safe) 사용 시:
+- advance/LSB/vertical: 동일 (~100%)
+- **kerning: ~5%** (휴리스틱이 NotoSansKR 의 ASCII × ASCII 페어 1K 만 잡고, 한자-한자 페어 19.9K 누락)
+- shaped advance: ~50% (cmap 의 일반 codepoint 만, language-specific 변화는 잡지만 unnamed glyph 미포함)
+
+CJK 폰트의 kerning 100% 가 EULA 우선이라면 — kerning 복원 포기하거나, file 백엔드 사용 가능한 폰트만 대상으로 함.
 
 ## 엔드 투 엔드 예시
 

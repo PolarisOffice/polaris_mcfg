@@ -124,14 +124,27 @@ for (l, r) in candidates:
 - 2단계의 HB shape 는 폰트 file 을 *내부적으로* 읽지만 우리에게는 **rendering 결과** (positioning numeric) 만 줌
 - 폰트의 internal pair list (어떤 페어가 정의되어 있는지) 는 **우리 코드가 알 길 없음** — 그저 우리 휴리스틱 후보가 폰트에 정의된 페어와 우연히 겹치면 0 이 아닌 값이 나옴
 
-### 1.4.2 휴리스틱의 한계
+### 1.4.2 휴리스틱의 한계 — CJK 폰트에선 거의 무용
 
-기본 모드의 ~90% 복원율은 **휴리스틱이 보통 폰트의 페어 분포와 일치한다는 가정** 에 기반:
-- 라틴 폰트: 페어 거의 다 ASCII × ASCII → 휴리스틱이 잘 잡음
-- CJK 폰트: 라틴 × 한국어 구두점, 한자 × 한자 페어 일부 → 휴리스틱이 부분만 잡음 (Cyrillic, Hebrew, Arabic 페어는 누락)
-- 특이한 페어 분포 폰트 (예: 라틴 × 한자 페어): 휴리스틱 완전히 빗나감 → 0% 복원
+실측 (`fonts/` 디렉토리의 샘플들):
 
-이 한계를 채우려면 `--pair-list-from FILE` 로 폰트의 실제 pair list 를 받아옴 (영역 B 진입).
+| 폰트 | 폰트의 전체 페어 | 휴리스틱 ∩ 폰트 페어 | 휴리스틱 coverage |
+|---|---:|---:|---:|
+| NotoSansKR-Bold | 20,997 | 1,038 | **5.0%** |
+| NotoSansKR-Regular | 20,948 | 1,036 | 5.0% |
+| Pretendard-Regular | 402,119 | 1,071 | **0.3%** |
+| Pretendard-Bold | 403,019 | 1,073 | 0.3% |
+
+해석:
+- **NotoSansKR**: 21K 페어 중 휴리스틱이 1K (5%) 만 겹침. 나머지 19.9K 는 한자-한자 클래스 페어, Hangul-Latin 크로스 페어, Cyrillic 페어 — **휴리스틱이 가정한 ASCII 영역 밖**.
+- **Pretendard**: GPOS PairPos format 2 (class kerning) 가 ~400K 페어로 expand 됨. 휴리스틱 0.3% 만 겹침.
+- **일반 라틴 폰트**: 페어 거의 다 ASCII × ASCII → 휴리스틱이 70~95% 잡음.
+
+따라서:
+- 휴리스틱 (영역 A) 단독은 **라틴 본문 폰트에서만 의미 있는 결과**.
+- CJK 폰트의 kerning 을 제대로 복원하려면 `--pair-list-from FILE` (영역 B) **사실상 필수**.
+
+만약 EULA 가 영역 B 를 금지하는 폰트라면, kerning 복원을 포기하거나, 사용자가 직접 cmap × cmap brute-force 의 일부를 시도해야 함 (시간상 비현실적 — 24K 글리프 폰트면 ~수개월).
 
 ### 1.5 행위별 매트릭스
 
