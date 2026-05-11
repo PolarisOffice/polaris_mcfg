@@ -219,6 +219,42 @@ def _apply_advance_and_lsb(font: TTFont, metrics: MetricsSpec,
 _NOTDEF_STUB_NAME = "polaris.notdef_fallback"
 
 
+def _sync_vmtx_for_stub(font: TTFont, stub_name: str,
+                        source_glyph: str | None = None) -> None:
+    """If the font has ``vhea``/``vmtx``, register a vertical metric for
+    a newly-added stub glyph.
+
+    Without this, the design font's ``vmtx`` ends up shorter than
+    ``numGlyphs`` after any stub insertion (``_apply_gsub_overrides``,
+    ``_route_missing_to_notdef``), and fontTools' next load of the result
+    fails with ``not enough 'vmtx' table data: expected N bytes, got M``.
+
+    The synthetic glyph has no real vertical extents, so we copy the
+    metric of ``source_glyph`` when given (semantically closest), and
+    otherwise fall back to the table's first entry (any valid value
+    keeps the table the right length).
+    """
+    if "vmtx" not in font or "vhea" not in font:
+        return
+    vmtx = font["vmtx"]
+    if stub_name in vmtx.metrics:
+        return
+    if source_glyph and source_glyph in vmtx.metrics:
+        vmtx.metrics[stub_name] = vmtx.metrics[source_glyph]
+        return
+    if vmtx.metrics:
+        # Use the first existing entry as a default; arbitrary choice
+        # but keeps the table valid. Stub is logically empty so its
+        # vertical advance / TSB don't carry semantic meaning.
+        sample = next(iter(vmtx.metrics.values()))
+        vmtx.metrics[stub_name] = sample
+    else:
+        # No existing metrics; fall back to font's vhea advance.
+        vhea = font["vhea"]
+        adv = int(getattr(vhea, "advanceHeightMax", 1000) or 1000)
+        vmtx.metrics[stub_name] = (adv, 0)
+
+
 def _route_missing_to_notdef(
     font: TTFont, metrics: MetricsSpec,
     missing_codepoints: list[int],
@@ -253,6 +289,13 @@ def _route_missing_to_notdef(
     # Add the stub glyph if not already present.
     glyph_order = list(font.getGlyphOrder())
     if _NOTDEF_STUB_NAME not in glyph_order:
+        # Force-load vmtx (if present) BEFORE bumping numGlyphs.
+        # fontTools' lazy vmtx decompile checks the raw byte size
+        # against maxp.numGlyphs, so once numGlyphs is increased the
+        # original vmtx bytes look "short" and decompile fails.
+        if "vmtx" in font:
+            font["vmtx"]  # noqa: B018 - triggers decompile
+
         stub = Glyph()
         stub.numberOfContours = 0
         font["glyf"][_NOTDEF_STUB_NAME] = stub
@@ -260,6 +303,7 @@ def _route_missing_to_notdef(
         font.setGlyphOrder(glyph_order)
         font["maxp"].numGlyphs = len(glyph_order)
         hmtx.metrics[_NOTDEF_STUB_NAME] = (notdef_advance, 0)
+        _sync_vmtx_for_stub(font, _NOTDEF_STUB_NAME, source_glyph=".notdef")
 
     cmap_table = font["cmap"]
     for sub in cmap_table.tables:
@@ -310,12 +354,53 @@ def _apply_kerning(font: TTFont, metrics: MetricsSpec,
     if not pairs:
         return {"pairs": 0, "skipped": skipped}
 
-    _write_classic_kern(font, pairs)
+    classic_written = _write_classic_kern(font, pairs)
     _write_gpos_kern(font, pairs)
-    return {"pairs": len(pairs), "skipped": skipped}
+    return {
+        "pairs": len(pairs),
+        "skipped": skipped,
+        "classicKernWritten": classic_written,
+        # If the classic kern table was skipped due to the 16-bit
+        # subtable-length limit, modern shapers still get the full pair
+        # set via GPOS — only ancient shapers that ignore GPOS would
+        # notice.
+        "classicKernSkippedReason": ("size>16bit-limit"
+                                     if classic_written == 0
+                                     and len(pairs) > MAX_CLASSIC_KERN_PAIRS
+                                     else None),
+    }
 
 
-def _write_classic_kern(font: TTFont, pairs: dict[tuple[str, str], int]) -> None:
+#: Maximum pairs a single classic ``kern`` format-0 subtable can encode.
+#:
+#: The subtable header has a 16-bit ``length`` field (max 65535 bytes).
+#: Layout: 14-byte header + 6 bytes per pair, so::
+#:
+#:     max_pairs = (65535 - 14) // 6 = 10920
+#:
+#: Above this, fontTools' kern compiler silently truncates the length
+#: field, leaving the font with a length value 16-bit-wrapped from the
+#: real byte count. fontTools (and every other parser following the
+#: spec) then refuses to read the table at load time. We don't try to
+#: split into multiple subtables — modern shapers (HarfBuzz, DirectWrite,
+#: CoreText, Skia) all prefer GPOS pair-positioning, and we write that
+#: in ``_write_gpos_kern`` regardless, so legacy ``kern`` is purely a
+#: fallback for very old shapers. Skipping the classic table when it
+#: would overflow is the safer trade-off.
+MAX_CLASSIC_KERN_PAIRS = 10920
+
+
+def _write_classic_kern(font: TTFont, pairs: dict[tuple[str, str], int]) -> int:
+    """Write a classic ``kern`` table. Returns the pair count written
+    (0 if skipped due to size).
+
+    When ``len(pairs)`` exceeds the 16-bit subtable length limit, this
+    function refuses to write the classic ``kern`` table — GPOS still
+    carries the same pairs via ``_write_gpos_kern``, so no visible
+    layout is lost on modern shapers.
+    """
+    if len(pairs) > MAX_CLASSIC_KERN_PAIRS:
+        return 0
     from fontTools.ttLib.tables._k_e_r_n import KernTable_format_0
     kern = newTable("kern")
     kern.version = 0
@@ -327,6 +412,7 @@ def _write_classic_kern(font: TTFont, pairs: dict[tuple[str, str], int]) -> None
     sub.kernTable = dict(pairs)
     kern.kernTables = [sub]
     font["kern"] = kern
+    return len(pairs)
 
 
 def _write_gpos_kern(font: TTFont, pairs: dict[tuple[str, str], int]) -> None:
@@ -507,6 +593,12 @@ def _apply_shaped_advances(
     hmtx = font["hmtx"]
     glyph_order = list(font.getGlyphOrder())
 
+    # Force-load vmtx (if present) before any stub glyph insertion. Once
+    # we bump maxp.numGlyphs the raw vmtx byte size looks short to
+    # fontTools' lazy decompile and the table fails to load.
+    if "vmtx" in font:
+        font["vmtx"]  # noqa: B018 - triggers decompile
+
     # Strip the design font's existing `locl` feature first. `locl` is the
     # OpenType feature browsers auto-activate based on the page ``lang``
     # attribute, and it carries the design font's *own* per-script
@@ -556,6 +648,10 @@ def _apply_shaped_advances(
             # positioned the same; only the advance reflects the override.
             old_lsb = hmtx.metrics[gn][1] if gn in hmtx.metrics else 0
             hmtx.metrics[stub_name] = (advance, old_lsb)
+            # If the design has vertical metrics, the stub must too —
+            # otherwise vmtx ends up shorter than numGlyphs and the
+            # font fails to reload.
+            _sync_vmtx_for_stub(font, stub_name, source_glyph=gn)
         contexts.setdefault(ctx, {})[gn] = stub_name
 
     if not contexts:
