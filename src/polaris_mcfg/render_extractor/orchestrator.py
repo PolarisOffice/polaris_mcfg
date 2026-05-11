@@ -43,6 +43,7 @@ from .kerning import (
     default_pair_candidates,
     extract_kerning_pairs,
 )
+from .shaped import DEFAULT_SHAPING_CONTEXTS, extract_shaped_advances
 from .units import pixel_to_unit, pixel_to_unit_float
 
 # Default characters used for vertical-metric probing.
@@ -265,6 +266,8 @@ def extract_via_render(
     progress: bool = False,
     pair_candidates: list[PairCandidate] | None = None,
     kern_threshold_units: int = DEFAULT_KERN_THRESHOLD_UNITS,
+    include_shaped: bool = False,
+    shaping_contexts: tuple[tuple[str, str], ...] = DEFAULT_SHAPING_CONTEXTS,
 ) -> MetricsSpec:
     """Render-based extraction.
 
@@ -392,6 +395,15 @@ def extract_via_render(
             progress=progress,
         )
 
+    # P6: shaped-advance overrides (opt-in)
+    shaped_advances: list[ShapedAdvanceOverride] | None = None
+    if include_shaped:
+        if progress:
+            print(f"  probing shaped advances for {len(cmap)} codepoints...")
+        shaped_advances = extract_shaped_advances(
+            font_path, cmap, contexts=shaping_contexts, progress=progress,
+        )
+
     global_metrics = GlobalMetrics(
         unitsPerEm=upem_used,
         head=global_dicts["head"],
@@ -418,5 +430,6 @@ def extract_via_render(
         global_metrics=global_metrics,
         glyphs=glyphs,
         kerning=kerning,
+        shaped_advances=shaped_advances,
     )
     return spec
