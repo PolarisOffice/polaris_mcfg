@@ -412,6 +412,16 @@ def extract_metrics(
               default=True,
               help="Disable the Hangul-monospace fast-path "
                    "(--backend render only).")
+@click.option("--pixel-only", is_flag=True,
+              help="Strictest EULA mode (--backend render only). Pure "
+                   "pixel measurement: no HarfBuzz shaping (kerning + "
+                   "shaped advance lost) and no file-backend numeric "
+                   "copy (--metadata-from / --pair-list-from / "
+                   "--unnamed-from / --full-reference auto-disabled). "
+                   "Recovers ~80% of metrics (advance + LSB + vertical "
+                   "+ italic angle + underline). For fonts whose EULA "
+                   "explicitly forbids metric extraction or reverse "
+                   "engineering.")
 @click.option("--workdir", type=click.Path(file_okay=False, path_type=Path),
               default=None,
               help="Dump each rendered probe to this directory as PNG "
@@ -488,7 +498,8 @@ def extract_metrics(
               help="Fix volatile fields (timestamp) for reproducible output.")
 @click.option("--indent", type=int, default=2, show_default=True)
 def extract_cmd(font: Path, output: Path | None, backend: str, renderer: str,
-                render_size: int, detect_monospace: bool, workdir: Path | None,
+                render_size: int, detect_monospace: bool, pixel_only: bool,
+                workdir: Path | None,
                 metadata_from: Path | None, pair_list_from: Path | None,
                 unnamed_from: Path | None,
                 full_reference: Path | None,
@@ -534,6 +545,7 @@ def extract_cmd(font: Path, output: Path | None, backend: str, renderer: str,
             update_spec=update_spec,
             refresh_cmap=refresh_cps,
             refresh_blocks=list(refresh_blocks) if refresh_blocks else None,
+            pixel_only=pixel_only,
         )
     else:
         spec = extract_metrics(

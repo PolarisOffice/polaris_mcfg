@@ -72,6 +72,19 @@ mcfg --help
 
 자세한 내용: [docs/design/12-render-extractor.md](docs/design/12-render-extractor.md).
 
+### EULA 강도별 모드 매트릭스 (`--backend render`)
+
+폰트 EULA 가 어디까지 허용하느냐에 따라 다른 layer 를 선택하세요:
+
+| 모드 | 사용 layer | EULA 위치 | 메트릭 복원율 |
+|---|---|---|---:|
+| `--pixel-only` | 순수 픽셀 측정만 | "디자이너가 화면 보고 자로 잰다" 와 동등. **모든 EULA 안전** | ~80% (advance + LSB + vertical + italic + underline) |
+| (기본) | + HarfBuzz shape | HB 는 텍스트 엔진 (브라우저/OS 가 매일 사용). "정상 사용" 으로 일반 인정 | ~90% (+ kerning + shaped advance) |
+| `--full-reference` | + file numeric copy (pair list, metadata, unnamed glyph) | fontTools 로 file table read. **numeric only** (outline 안 봄). 엄격한 EULA 해석 시 reverse engineering 으로 분류 가능 | ~100% |
+| `--backend file` | 전체 file parsing | 강한 reverse engineering. EULA 가 명시 금지 시 위반 | 100% (정수 정확) |
+
+자세한 layer 별 EULA 분석: [docs/design/12-render-extractor.md §1](docs/design/12-render-extractor.md#1-라이센스-안전-경계).
+
 ## 엔드 투 엔드 예시
 
 ```bash

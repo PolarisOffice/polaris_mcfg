@@ -15,17 +15,54 @@ EULA가 file parsing("metric extraction" / "reverse engineering")을 명시
 
 ## 1. 라이센스 안전 경계
 
-| 행위 | file 백엔드 | render 백엔드 |
-|---|:---:|:---:|
-| 폰트 테이블 직접 파싱 | ✅ | ❌ |
-| 글리프 outline 좌표 추출 | ❌ | ❌ |
-| 폰트 렌더링 결과 (픽셀) 측정 | n/a | ✅ |
-| OS 텍스트 API (`CTRunGetAdvances` 등) 호출 | ❌ (선택적) | ✅ |
-| `@font-face` 로 브라우저에서 텍스트 렌더 | n/a | ✅ |
+폰트 EULA 가 허용하는 범위가 다양하므로 본 도구는 layer 별로 모드를 선택할
+수 있도록 설계되었다.
 
-브라우저 백엔드의 EULA 방어선: "사용자가 웹 페이지에 폰트를 임베드해서 본
-화면을 자로 측정한다" 와 본질적으로 동일하다. 폰트 파일을 우리 코드가 직접
-열어서 파싱하지 않는다.
+### 1.1 레이어별 EULA 위치
+
+```
+강한 reverse engineering  ↑                                  ↓ 일반 사용
+   file 직접 파싱        HB shape       Pixel 측정       사람 손 + 자
+  (fontTools)           (HarfBuzz)     (FreeType)
+       ↓                    ↓              ↓
+   table 데이터          internal       render output     자로 측정
+   직접 추출             access only    만 측정
+```
+
+| Layer | "정상 사용" 정의 부합 | 주요 한계 |
+|---|---|---|
+| **Pure pixel rendering + measurement** | ✅ "화면 자로 측정" 과 동등. 모든 EULA 안전 | advance/LSB/vertical 만 (no kerning, no shaped advance) |
+| **+ HarfBuzz shape** | ⚠️ HB 는 OS/브라우저 표준 텍스트 엔진. 결과 numeric 만 사용 | HB 가 내부적으로 file 파싱. "내부 reverse engineering" 논쟁 여지 |
+| **+ file pair list (numeric)** | ❌ fontTools 로 직접 파싱. 단, metric *값* 이 아니라 *list* (pair tuple) 만 | 메트릭 list 도 추출로 해석 가능 |
+| **+ file metadata flags** | ❌ 직접 파싱. 단, 분류 라벨만 (italicAngle, fsSelection 등) | 분류 정보 추출도 위반 가능 |
+| **+ file unnamed glyph numeric** | ❌ 명백한 file parsing. metric 값 직접 read | 가장 위 layer |
+
+### 1.2 우리 도구의 모드별 매핑
+
+| 모드 | 활성 layer | EULA 강도 | 복원율 |
+|---|---|---|---:|
+| `--pixel-only` | Pixel 만 | **모든 EULA 안전** | ~80% |
+| (기본) | + HB shape | 중간 | ~90% |
+| `--full-reference FILE` | + file numeric copy | 약-중 | ~100% |
+| `--backend file` | 전체 file parsing | 가장 약 | 100% |
+
+### 1.3 행위별 매트릭스
+
+| 행위 | file 백엔드 | render 기본 | render `--pixel-only` |
+|---|:---:|:---:|:---:|
+| 폰트 테이블 직접 파싱 (fontTools) | ✅ | ❌ (cmap 만) | ❌ (cmap 만) |
+| 글리프 outline 좌표 추출 | ❌ | ❌ | ❌ |
+| 폰트 렌더링 결과 (픽셀) 측정 | n/a | ✅ | ✅ |
+| HarfBuzz shape() 호출 (kerning, shaped 추출) | n/a | ✅ | ❌ |
+| File numeric copy (pair list, metadata, unnamed) | n/a | opt-in | ❌ |
+| OS 텍스트 API (`CTRunGetAdvances` 등) 호출 | n/a | (browser 백엔드만) | ✅ |
+| `@font-face` 로 브라우저에서 텍스트 렌더 | n/a | (browser 백엔드만) | ✅ |
+
+### 1.4 권장 선택 가이드
+
+- **OFL / 일반 상용 폰트** (대부분): 기본 모드. HB shape 까지 사용 OK.
+- **EULA 가 "metric extraction" 명시 금지 폰트** (일부 한컴 폰트, 일부 사내 폰트): `--pixel-only` 사용. kerning 손실 있지만 EULA 안전.
+- **EULA 가 모든 reverse engineering 금지 폰트**: 진정한 EULA-safe 는 사실 폰트를 자로 측정하는 것뿐. `--pixel-only` 가 가장 가깝지만 fontTools cmap-read 도 회피하려면 사용자가 `--cmap` 직접 명시 필요 (TODO).
 
 ## 2. 아키텍처
 

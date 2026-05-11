@@ -362,6 +362,7 @@ def extract_via_render(
     update_spec: str | Path | None = None,
     refresh_cmap: list[int] | None = None,
     refresh_blocks: list[str] | None = None,
+    pixel_only: bool = False,
 ) -> MetricsSpec:
     """Render-based extraction.
 
@@ -391,6 +392,39 @@ def extract_via_render(
         If True, print a one-line progress update every 500 glyphs.
     """
     font_path = Path(font_path)
+
+    # --pixel-only is the strictest EULA mode. It force-disables every
+    # path that touches the font file outside the rendering pipeline:
+    # - HarfBuzz shape (kerning + shaped advance extraction)
+    # - file-backend numeric copy (metadata flags, pair list, unnamed)
+    # With these off, the only inputs are the raster pixel buffers the
+    # FreeType / browser backend produces, plus a cmap-table read for
+    # codepoint enumeration. Result: ~80% metric coverage (advance,
+    # LSB, vertical, italic angle, underline). Kerning and shaped
+    # advance are lost. For fonts whose EULA explicitly forbids metric
+    # extraction or reverse engineering.
+    pixel_only_overridden: list[str] = []
+    if pixel_only:
+        for name, val in (
+            ("include_kerning", include_kerning),
+            ("include_shaped", include_shaped),
+        ):
+            if val:
+                pixel_only_overridden.append(name)
+        include_kerning = False
+        include_shaped = False
+        for name, val in (
+            ("metadata_from", metadata_from),
+            ("pair_list_from", pair_list_from),
+            ("unnamed_from", unnamed_from),
+            ("full_reference", full_reference),
+        ):
+            if val is not None:
+                pixel_only_overridden.append(name)
+        metadata_from = None
+        pair_list_from = None
+        unnamed_from = None
+        full_reference = None
 
     # --full-reference FILE is shorthand for both --metadata-from FILE
     # and --pair-list-from FILE (most callers want both together).
@@ -623,6 +657,10 @@ def extract_via_render(
         source["metadataReference"] = str(Path(metadata_from).name)
     if pair_list_from is not None:
         source["pairListReference"] = str(Path(pair_list_from).name)
+    if pixel_only:
+        source["pixelOnly"] = True
+        if pixel_only_overridden:
+            source["pixelOnlyDisabled"] = pixel_only_overridden
     # Unnamed glyph numeric copy (advance + LSB + kerning involving
     # them). These are font-internal glyphs no codepoint maps to, so
     # the render extractor cannot reach them through text rendering.
