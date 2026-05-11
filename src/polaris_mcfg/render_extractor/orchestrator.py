@@ -76,9 +76,16 @@ MONOSPACE_BLOCKS: tuple[tuple[str, range, tuple[str, ...]], ...] = (
     ("CJK Compatibility Ideographs",
      range(0xF900, 0xFB00),
      ("豈", "更", "車", "說")),
+    # Halfwidth/Fullwidth Forms is a *mixed* block: U+FF01..U+FF5E are
+    # fullwidth Latin (1000u), U+FF61..U+FFDC are halfwidth Katakana/
+    # Hangul-Jamo (500u). The probe set deliberately mixes both — when
+    # the block is genuinely monospace (rare) all four agree; in any
+    # real font, fullwidth probe "Ａ"=1000u disagrees with halfwidth
+    # probe "ｦ"=500u, fast-path rejects, and each codepoint is measured
+    # individually.
     ("Halfwidth/Fullwidth Forms",
      range(0xFF00, 0xFFF0),
-     ("！", "Ａ", "ｚ", "／")),
+     ("！", "Ａ", "ｚ", "ｦ")),
 )
 
 # Back-compat alias: legacy code paths import HANGUL_MONOSPACE_PROBES

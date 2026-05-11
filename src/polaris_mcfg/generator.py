@@ -896,12 +896,17 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
             missing_mode=missing_glyph,
         )
 
-    if "kerning" in apply_set:
-        stats["kerning"] = _apply_kerning(font, metrics, id_to_name)
-
     if "vertical" in apply_set:
         stats["vertical"] = _apply_vertical(font, metrics, id_to_name)
 
+    # NOTE: gsub MUST run before kerning. _apply_shaped_advances calls
+    # fontTools' addOpenTypeFeaturesFromString to install the `locl`
+    # GSUB substitutions, and that call rebuilds the GPOS FeatureList
+    # from the FEA snippet — if kerning's GPOS PairPos lookup was
+    # already written, it gets unhooked from the GPOS FeatureList
+    # (the underlying lookup survives in LookupList but no feature
+    # references it, so shapers see no kerning). Running kerning last
+    # ensures GPOS ends in the state _apply_kerning created.
     if "gsub" in apply_set:
         src_upm_for_gsub = metrics.global_metrics.unitsPerEm
         dst_upm_for_gsub = font["head"].unitsPerEm
@@ -909,6 +914,9 @@ def generate_font(metrics: MetricsSpec, design_font_path: str | Path,
             font, metrics, id_to_name,
             src_upm=src_upm_for_gsub, dst_upm=dst_upm_for_gsub,
         )
+
+    if "kerning" in apply_set:
+        stats["kerning"] = _apply_kerning(font, metrics, id_to_name)
 
     if family_name or style_name or license_text or license_url:
         _update_name_table(font, family_name=family_name, style_name=style_name,
