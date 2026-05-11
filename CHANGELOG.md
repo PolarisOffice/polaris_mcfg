@@ -2,6 +2,49 @@
 
 All notable changes to Polaris MCFG.
 
+## [0.3.1] — 2026-05-11 — generator bugfixes + render debug tooling
+
+### Fixed (generator)
+
+- **classic `kern` subtable 16-bit length overflow**: The OpenType
+  ``kern`` format-0 subtable header has a 16-bit ``length`` field
+  (max 65535 bytes). With 14-byte header + 6 bytes per pair, the
+  safe limit is 10,920 pairs. fontTools silently writes the wrapped
+  value above that, leaving the table unloadable. ``_write_classic_kern``
+  now skips the legacy table when ``len(pairs) > MAX_CLASSIC_KERN_PAIRS``.
+  GPOS PairPos already carries the same pairs and every modern shaper
+  prefers it. NotoSansKR-Bold (20,997 pairs) was the original trigger.
+- **`vmtx` underfill after stub-glyph insertion**: ``_apply_shaped_advances``
+  (``--apply gsub``) and ``_route_missing_to_notdef`` (``--missing-glyph notdef``)
+  insert synthetic stub glyphs and bump ``maxp.numGlyphs``. The design's
+  ``vmtx`` was left at original size → fontTools' next load raised
+  "not enough 'vmtx' table data". New helper ``_sync_vmtx_for_stub``
+  registers a vertical metric for each stub; both call sites also
+  force-load ``vmtx`` BEFORE bumping ``numGlyphs`` (lazy decompile
+  fails once ``numGlyphs`` has changed).
+
+### Added
+
+- ``mcfg extract --backend render --workdir DIR`` dumps every probe
+  PNG to ``DIR`` for debugging / illustration. RenderBackend gains a
+  ``workdir`` constructor arg and a template-method ``_do_render`` hook.
+- ``samples/render_vs_file_accuracy.py``: statistical comparison of
+  the two backends. Reports per-metric diff distributions (p50/p95/p99/
+  |max|) and pass/fail against the design-doc gates.
+- ``samples/end_to_end_render_vs_file.py``: full pipeline equivalence
+  demo — file backend vs render backend → generate → compare → validate.
+
+### Tests
+
+121 → 125 (+4 regressions in
+``tests/test_generator_kern_vmtx_fixes.py``):
+- classic kern skipped when over limit, font remains loadable
+- classic kern still written under limit (legacy compat)
+- apply-gsub stub insertion keeps vmtx valid
+- notdef-fallback stub insertion keeps vmtx valid
+
+---
+
 ## [0.3.0] — 2026-05-11 — M8 render-based extractor
 
 EULA-safe metric extraction: instead of reading font tables directly,
