@@ -10,8 +10,8 @@ The Orchestrator decides:
 This is the only module a user-facing CLI talks to.
 
 Phases (see ``docs/design/12-render-extractor.md`` §8):
-    P1: backend wiring + single-glyph advance probe (this file's first cut)
-    P2: vertical metrics, full-cmap advance + LSB + BBox
+    P1: backend wiring + single-glyph advance probe
+    P2: vertical metrics, full-cmap advance + LSB + BBox (this file)
     P3: Hangul monospace auto-detect + replication
     P4: kerning pair enumeration + threshold
     P5: browser backend selection
@@ -37,7 +37,7 @@ from .analyzer import (
     measure_glyph_bbox,
 )
 from .backends import RenderBackend, RenderRequest
-from .units import pixel_to_unit
+from .units import pixel_to_unit, pixel_to_unit_float
 
 # Default characters used for vertical-metric probing.
 DEFAULT_VERT_REFS = {"cap": "H", "x": "x", "desc": "g", "asc": "l"}
@@ -91,6 +91,26 @@ def probe_advance(backend: RenderBackend, ch: str, size_px: int = 1000,
     return measure_advance_repeated(result)
 
 
+def probe_advance_and_lsb(backend: RenderBackend, ch: str, size_px: int = 1000,
+                          repeats: int = 4) -> tuple[float, float | None]:
+    """Measure advance + LSB (left side bearing) for a single character.
+
+    LSB is the gap between the pen position and the leftmost ink pixel.
+    For empty glyphs (whitespace) LSB is undefined and returned as ``None``.
+    """
+    text = ch * repeats
+    result = backend.render(RenderRequest(text=text, size_px=size_px))
+    advance = measure_advance_repeated(result)
+    if not result.glyphs:
+        return advance, None
+    bbox = measure_glyph_bbox(result.image, result.glyphs[0])
+    if bbox.is_empty:
+        return advance, None
+    # LSB = ink_left - pen_x
+    lsb = bbox.ink_left - bbox.pen_x
+    return advance, lsb
+
+
 def probe_vertical(backend: RenderBackend, size_px: int = 1000,
                    refs: dict[str, str] = DEFAULT_VERT_REFS) -> dict[str, float]:
     """Render the vertical reference string and return pixel-space metrics.
@@ -126,6 +146,75 @@ def _hangul_is_monospace(backend: RenderBackend, size_px: int = 1000,
     return False, None
 
 
+def _measure_global(backend: RenderBackend, size_px: int,
+                    upem: int) -> dict[str, dict]:
+    """Build the ``GlobalMetrics`` sub-dicts (head/hhea/OS/2/post) from render.
+
+    Only fields we can plausibly recover from rendered output are filled.
+    Field choices roughly mirror file-extractor's ``HHEA_FIELDS`` /
+    ``OS2_FIELDS`` / ``POST_FIELDS`` but skip outline-derived items.
+    """
+    px = probe_vertical(backend, size_px=size_px)
+
+    def u(name: str) -> int:
+        return pixel_to_unit(px[name], size_px=size_px, upem=upem)
+
+    ascent = u("ascent") if "ascent" in px else None
+    descent = u("descent") if "descent" in px else None
+    cap = u("cap_height") if "cap_height" in px else None
+    xh = u("x_height") if "x_height" in px else None
+
+    hhea: dict = {}
+    if ascent is not None:
+        hhea["ascent"] = ascent
+    if descent is not None:
+        # OpenType hhea descent is *negative* below baseline (per spec).
+        hhea["descent"] = -descent
+    # lineGap is hard to measure from one render; punt to 0 unless caller
+    # uses a multi-line probe.
+    hhea["lineGap"] = 0
+
+    os2: dict = {}
+    if ascent is not None:
+        os2["sTypoAscender"] = ascent
+        os2["usWinAscent"] = ascent
+    if descent is not None:
+        os2["sTypoDescender"] = -descent
+        os2["usWinDescent"] = descent  # usWin* fields are positive
+    os2["sTypoLineGap"] = 0
+    if cap is not None:
+        os2["sCapHeight"] = cap
+    if xh is not None:
+        os2["sxHeight"] = xh
+
+    return {"head": {}, "hhea": hhea, "os2": os2, "post": {}}
+
+
+def _enumerate_cmap_from_font(font_path: Path) -> list[int]:
+    """For tests: list the cmap codepoints of a font without exposing them.
+
+    The render extractor is meant to be used when the caller can't (or
+    won't) read the file. But in practice the caller still needs to know
+    *which* codepoints to probe. Two strategies:
+
+    1. Caller supplies the list explicitly (production use).
+    2. Caller asks us to read just the ``cmap`` table from the font file.
+       The ``cmap`` table is a numeric whitelist of supported codepoints
+       — no outline data — and reading it is uncontroversial under any
+       reasonable EULA.
+
+    This helper is the strategy-2 fallback. It reads ONLY the ``cmap``
+    table via fontTools.
+    """
+    from fontTools.ttLib import TTFont
+    font = TTFont(str(font_path), lazy=True)
+    try:
+        cmap = font.getBestCmap() or {}
+        return sorted(cmap.keys())
+    finally:
+        font.close()
+
+
 def extract_via_render(
     font_path: str | Path,
     *,
@@ -138,12 +227,12 @@ def extract_via_render(
     detect_monospace: bool = True,
     cmap: Iterable[int] | None = None,
     skip_kerning: bool = False,
+    max_glyphs: int | None = None,
+    progress: bool = False,
 ) -> MetricsSpec:
-    """Render-based extraction (P1: minimal stub).
+    """Render-based extraction.
 
     Returns a :class:`MetricsSpec` populated from rendered measurements.
-    In P1 we populate only ``unitsPerEm`` and a small handful of cmap
-    glyphs as a proof of life. Phases P2+ fill in the rest.
 
     Parameters
     ----------
@@ -156,30 +245,60 @@ def extract_via_render(
     upem
         UPM frame to report metrics in. The backend's reported UPM (if
         any) takes priority; otherwise this value is used.
+    include_lsb
+        Measure per-glyph left side bearing in addition to advance.
     cmap
-        Iterable of unicode codepoints to measure. If ``None``, P1 uses
-        a tiny default set ``"HxglMABCabc012가"`` to keep tests fast.
+        Iterable of unicode codepoints to measure. If ``None``, the cmap
+        is read from the font's ``cmap`` table (a uncontroversial-to-read
+        numeric whitelist — no outline data).
+    max_glyphs
+        If given, only the first N codepoints are measured. Useful for
+        smoke tests on huge CJK fonts.
+    progress
+        If True, print a one-line progress update every 500 glyphs.
     """
     font_path = Path(font_path)
+
     if cmap is None:
-        cmap = [ord(c) for c in "HxglMABCabc012가"]
+        cmap = _enumerate_cmap_from_font(font_path)
     cmap = list(cmap)
+    if max_glyphs is not None:
+        cmap = cmap[:max_glyphs]
 
     with _open_backend(font_path, renderer) as backend:
         reported_upem = backend.reported_upem()
         upem_used = reported_upem if reported_upem is not None else upem
 
-        # Per-glyph advance (P1: minimal; P2 expands)
+        # Global / vertical metrics (single render)
+        global_dicts = _measure_global(backend, size_px=size_px, upem=upem_used)
+
         glyphs: dict[str, GlyphMetric] = {}
-        for cp in cmap:
+        for i, cp in enumerate(cmap):
             ch = chr(cp)
             try:
-                adv_px = probe_advance(backend, ch, size_px=size_px)
+                if include_lsb:
+                    adv_px, lsb_px = probe_advance_and_lsb(
+                        backend, ch, size_px=size_px)
+                else:
+                    adv_px = probe_advance(backend, ch, size_px=size_px)
+                    lsb_px = None
             except Exception:
                 continue
             adv_units = pixel_to_unit(adv_px, size_px=size_px, upem=upem_used)
-            glyphs[codepoint_to_id(cp)] = GlyphMetric(advanceWidth=adv_units)
+            lsb_units = (pixel_to_unit(lsb_px, size_px=size_px, upem=upem_used)
+                         if lsb_px is not None else None)
+            glyphs[codepoint_to_id(cp)] = GlyphMetric(
+                advanceWidth=adv_units, lsb=lsb_units)
+            if progress and (i + 1) % 500 == 0:
+                print(f"  ... {i + 1}/{len(cmap)} glyphs measured")
 
+    global_metrics = GlobalMetrics(
+        unitsPerEm=upem_used,
+        head=global_dicts["head"],
+        hhea=global_dicts["hhea"],
+        os2=global_dicts["os2"],
+        post=global_dicts["post"],
+    )
     spec = MetricsSpec(
         source={
             "filename": font_path.name,
@@ -188,7 +307,7 @@ def extract_via_render(
             "renderSizePx": size_px,
             "reportedUpem": reported_upem,
         },
-        global_metrics=GlobalMetrics(unitsPerEm=upem_used),
+        global_metrics=global_metrics,
         glyphs=glyphs,
     )
     return spec
