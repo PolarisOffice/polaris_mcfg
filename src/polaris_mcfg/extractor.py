@@ -440,6 +440,26 @@ def extract_metrics(
               help="Shorthand for both --metadata-from and --pair-list-from "
                    "pointing at the same font. The conventional way to ask "
                    "for full-fidelity render extraction.")
+@click.option("--update-spec", "update_spec",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help="Incremental update: start from an existing spec JSON "
+                   "and merge new measurements into it. Use with "
+                   "--refresh-cmap / --refresh-block to re-measure only "
+                   "the changed subset (avoids re-running the full ~40min "
+                   "pipeline after a probe fix).")
+@click.option("--refresh-cmap", "refresh_cmap",
+              default=None,
+              help="Comma-separated codepoints or ranges (e.g. "
+                   "'0x41,0x61-0x7A,0xAC00-0xD7A3') to re-measure when "
+                   "using --update-spec. Other glyphs carry through "
+                   "from the base spec.")
+@click.option("--refresh-block", "refresh_blocks", multiple=True,
+              help="Named unicode block to re-measure when using "
+                   "--update-spec. Can be repeated. Known names: "
+                   "'Hangul Syllables', 'CJK Unified Ideographs', "
+                   "'CJK Compatibility Ideographs', "
+                   "'Halfwidth/Fullwidth Forms'.")
 @click.option("--include-lsb", is_flag=True, help="Include left side bearings.")
 @click.option("--include-kerning", is_flag=True,
               help="Include kerning pairs (file: kern + GPOS PairPos; "
@@ -461,11 +481,29 @@ def extract_cmd(font: Path, output: Path | None, backend: str, renderer: str,
                 render_size: int, detect_monospace: bool, workdir: Path | None,
                 metadata_from: Path | None, pair_list_from: Path | None,
                 full_reference: Path | None,
+                update_spec: Path | None,
+                refresh_cmap: str | None,
+                refresh_blocks: tuple[str, ...],
                 include_lsb: bool, include_kerning: bool,
                 include_vertical: bool, include_gsub: bool,
                 include_shaped: bool,
                 deterministic: bool, indent: int) -> None:
     include_shaped_combined = include_gsub or include_shaped
+
+    # Parse --refresh-cmap into integer list.
+    refresh_cps: list[int] | None = None
+    if refresh_cmap:
+        refresh_cps = []
+        for tok in refresh_cmap.split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            if "-" in tok:
+                lo, hi = tok.split("-")
+                refresh_cps.extend(range(int(lo, 0), int(hi, 0) + 1))
+            else:
+                refresh_cps.append(int(tok, 0))
+
     if backend == "render":
         from .render_extractor import extract_via_render
         spec = extract_via_render(
@@ -481,6 +519,9 @@ def extract_cmd(font: Path, output: Path | None, backend: str, renderer: str,
             metadata_from=metadata_from,
             pair_list_from=pair_list_from,
             full_reference=full_reference,
+            update_spec=update_spec,
+            refresh_cmap=refresh_cps,
+            refresh_blocks=list(refresh_blocks) if refresh_blocks else None,
         )
     else:
         spec = extract_metrics(

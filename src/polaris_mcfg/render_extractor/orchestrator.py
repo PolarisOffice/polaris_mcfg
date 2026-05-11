@@ -43,6 +43,7 @@ from .kerning import (
     default_pair_candidates,
     extract_kerning_pairs,
 )
+from .incremental import expand_refresh_set, load_spec, merge_specs
 from .reference import (
     load_metadata_flags,
     load_pair_list,
@@ -355,6 +356,9 @@ def extract_via_render(
     metadata_from: str | Path | None = None,
     pair_list_from: str | Path | None = None,
     full_reference: str | Path | None = None,
+    update_spec: str | Path | None = None,
+    refresh_cmap: list[int] | None = None,
+    refresh_blocks: list[str] | None = None,
 ) -> MetricsSpec:
     """Render-based extraction.
 
@@ -393,8 +397,34 @@ def extract_via_render(
         if pair_list_from is None:
             pair_list_from = full_reference
 
+    # Incremental update mode: load the base spec; if refresh_* is set,
+    # restrict cmap to just the codepoints we want to re-measure. The
+    # remainder of the base spec's data carries over via merge_specs at
+    # the end. Without refresh_*, we re-measure the full cmap and the
+    # merge still keeps any base entries we didn't touch (e.g., kerning
+    # pairs outside our default candidates).
+    base_spec: MetricsSpec | None = None
+    if update_spec is not None:
+        base_spec = load_spec(update_spec)
+
+    refresh_set: set[int] | None = None
+    if refresh_cmap is not None or refresh_blocks is not None:
+        refresh_set = expand_refresh_set(refresh_cmap, refresh_blocks)
+        if base_spec is None:
+            raise ValueError(
+                "refresh_cmap / refresh_blocks require --update-spec to "
+                "supply the base spec being updated"
+            )
+
     if cmap is None:
-        cmap = _enumerate_cmap_from_font(font_path)
+        if refresh_set is not None:
+            cmap = sorted(refresh_set)
+        else:
+            cmap = _enumerate_cmap_from_font(font_path)
+    else:
+        cmap = list(cmap)
+        if refresh_set is not None:
+            cmap = sorted(set(cmap) & refresh_set)
     cmap = list(cmap)
     if max_glyphs is not None:
         cmap = cmap[:max_glyphs]
@@ -582,4 +612,13 @@ def extract_via_render(
         kerning=kerning,
         shaped_advances=shaped_advances,
     )
+
+    # Incremental: merge the freshly-measured overlay onto the base
+    # spec. Base entries (codepoints we didn't re-measure, pairs we
+    # didn't re-shape, etc.) carry through. Overlay wins on overlap.
+    if base_spec is not None:
+        spec = merge_specs(base_spec, spec)
+        spec.source["updateBase"] = str(Path(update_spec).name)
+        if refresh_set is not None:
+            spec.source["refreshedCodepoints"] = len(refresh_set)
     return spec
