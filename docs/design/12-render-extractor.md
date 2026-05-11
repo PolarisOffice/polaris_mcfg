@@ -1,7 +1,11 @@
 # 12. Render-based Extractor (M8)
 
-> **상태**: 설계 단계 (v0.3.0 작업 중).
+> **상태**: v0.3.4 출시 완료.
 > **선행 문서**: [01. 아키텍처](01-architecture.md), [03. 추출기](03-extractor.md).
+>
+> **TL;DR**: file 백엔드(`fontTools`로 테이블 직접 파싱) 외에 두 가지 추가
+> 모드 — Strict (render 만, EULA-strictest) 와 Full (render + file 의
+> numeric 보조, hybrid).
 
 ## 0. 목표
 
@@ -12,6 +16,27 @@ EULA가 file parsing("metric extraction" / "reverse engineering")을 명시
 > **비목표**: file 백엔드를 대체하지 않는다. file 백엔드가 EULA 상 가능하면
 > 그쪽이 항상 우월하다 (정확도, 속도, 컨텍스트 룩업 복원). render 백엔드는
 > 회피 수단.
+
+## 사용 모드 요약
+
+```bash
+# Strict — EULA 가 모든 metric extraction 금지
+mcfg extract source.ttf --backend render --pixel-only --include-lsb \
+     -o spec.json
+# 영역 A 만. ~80% 복원 (advance + LSB + vertical + italic + underline).
+# kerning / shaped advance / unnamed glyph 미복원.
+
+# Full — EULA 가 outline 만 금지 (대부분의 케이스)
+mcfg extract source.ttf --backend render --full-reference source.ttf \
+     -o spec.json
+# 영역 A + B 의 일부. ~100% 복원.
+# --full-reference 가 metadata-from, pair-list-from, unnamed-from,
+# include-lsb, include-kerning, include-shaped 자동 활성화.
+
+# 비교: file 백엔드 — 일반 OFL/상용 폰트
+mcfg extract source.ttf --include-lsb --include-kerning -o spec.json
+# < 1초, 100% 정수 정확.
+```
 
 ## 1. 라이센스 안전 경계
 
@@ -118,6 +143,58 @@ mcfg extract source.ttf --backend render --full-reference source.ttf \
 > - "페어 list 를 폰트에서 읽음" = `--pair-list-from` (또는 `--full-reference`) 일 때만 (영역 B)
 > - "HB shape 호출" = 영역 A 의 kerning 측정 메커니즘 (Strict 가 아닐 때)
 > - 두 행위는 독립적이지만 CJK 폰트에서 영역 A 단독 의미 없음.
+
+### 1.5 Full 모드는 hybrid 라는 점 정직하게
+
+`--full-reference SOURCE` 는 **render 측정 + file 분석의 hybrid**.
+
+| 메트릭 | 출처 |
+|---|---|
+| advance value | render 측정 |
+| LSB value (cmap glyph) | render 측정 |
+| vertical metrics | render 측정 + metadata override |
+| kerning value | HB shape (rendering pipeline) |
+| shaped advance value | HB shape |
+| pair list (어떤 페어가 있는지) | **file 분석** (영역 B) |
+| metadata flags (italicAngle 등) | **file 분석** (영역 B) |
+| unnamed glyph metric | **file 분석** (영역 B) |
+
+| | `--backend file` | Full mode (`--full-reference`) |
+|---|---|---|
+| 측정값 자체 | hmtx / GPOS 직접 read | **render 측정** |
+| enumeration / 분류 / unnamed | 직접 read | file 분석 (영역 B) |
+| **글리프 outline (`glyf`/`CFF`)** | ❌ never | ❌ never |
+| 시간 | < 1초 | ~40분 |
+
+Full 모드의 진짜 가치:
+1. **outline 절대 미접근** — 가장 명백한 reverse engineering 회피
+2. **자기 검증** — render 측정값이 file 의 값과 일치하는지 확인 (정확도 보장)
+
+**EULA 가 metric extraction 자체를 명시 금지하는 폰트**라면 Full 모드도 위반 — `--pair-list-from`, `--metadata-from`, `--unnamed-from` 모두 file 분석. 그럴 땐 **Strict 만 사용** (영역 A 만, kerning 포기).
+
+### 1.6 결론 — 두 가지 운영 모드
+
+영역 A 안에서 휴리스틱 단독은 CJK 폰트에서 ~5% kerning 만 복원하므로 (§1.4.2 실측), **운영상 의미 있는 모드는 두 개뿐**:
+
+```bash
+# Strict — 영역 A 만, EULA-strictest
+mcfg extract source.ttf --backend render --pixel-only --include-lsb \
+     -o spec.json
+
+# Full — 영역 A + B, 100% 복원
+mcfg extract source.ttf --backend render --full-reference source.ttf \
+     -o spec.json
+```
+
+| | **Strict** | **Full** |
+|---|---|---|
+| 영역 | A 만 | A + B (hybrid) |
+| advance / LSB / vertical | ~100% | ~100% |
+| kerning | **0** | **~100%** |
+| shaped advance | 0 | ~100% |
+| unnamed glyph metric | 0 | ~100% |
+| 메타데이터 분류 플래그 | pixel-derivable 만 | ~100% |
+| EULA 권장 폰트 | metric extraction 명시 금지 | outline 만 금지 |
 
 ### 1.4.1 기본 모드의 정확한 동작
 
@@ -306,29 +383,71 @@ language, advance)` 로 기록.
 
 ## 5. CLI
 
-```
-mcfg extract <font> --backend render \
-    [--renderer freetype|browser|coretext]   (default: auto)
-    [--render-size 1000]                     (default: 1000pt)
-    [--no-hinting]                           (default: ON)
-    [--detect-monospace / --no-detect-monospace]  (default: ON)
-    [--skip-kerning]
-    [--include-shaped]                       (browser only)
-    [--locales en,ko,ja]                     (--include-shaped 시)
-    [--pair-list FILE]                       (커스텀 페어 후보)
-    [--workdir DIR]                          (중간 PNG 디버그 출력)
-    [--include-lsb / --include-kerning / --include-vertical]  (file 백엔드와 동일)
-    -o metrics.json
+### 5.1 전체 옵션 매트릭스
+
+| 옵션 | 효과 |
+|---|---|
+| `--backend [file\|render]` | 기본 `file`. EULA 회피 시 `render` |
+| `--renderer [auto\|freetype\|browser]` | render 엔진. browser 가 가장 강한 EULA 방어선 (Chromium `@font-face` data: URL 적재) |
+| `--render-size N` | 측정 정밀도 — 1000px 기본 → 1u 정확도 |
+| `--workdir DIR` | 측정에 사용된 모든 PNG 를 DIR 에 dump (디버그/검증) |
+| `--detect-monospace / --no-detect-monospace` | Hangul/한자 monospace fast-path 자동 감지 (기본 ON) |
+| `--include-lsb` | per-glyph LSB 측정 |
+| `--include-kerning` | HB pair shape 으로 페어 간격 측정 (단독으로는 휴리스틱 후보, CJK 에선 ~5% 만 잡음) |
+| `--include-shaped` | 언어 컨텍스트별 advance 변화 |
+| `--metadata-from FILE` | head/hhea/OS-2/post 분류 플래그 numeric copy (영역 B) |
+| `--pair-list-from FILE` | 페어 후보 list numeric copy — 값은 HB shape 가 측정 (영역 B) |
+| `--unnamed-from FILE` | cmap 외 글리프 의 advance/LSB numeric copy (영역 B) |
+| `--full-reference FILE` | 위 셋 + `--include-lsb` / `--include-kerning` / `--include-shaped` 모두 활성화. **Full 모드의 단일 옵션** |
+| `--pixel-only` | HB shape + 모든 reference 옵션 force-disable. **Strict 모드** |
+| `--update-spec FILE` | incremental: base spec 위에 머지 (§6) |
+| `--refresh-cmap CPS` | incremental 시 재측정할 codepoint (e.g. "0xAC00-0xD7A3") |
+| `--refresh-block NAME` | incremental 시 재측정할 monospace block (repeatable) |
+
+## 6. Incremental update
+
+CJK 폰트 전체 cmap 측정은 ~40분. 작은 fix 마다 다시 돌리지 않도록 spec 위에 부분 머지:
+
+```bash
+# 최초 전체 측정 (한 번만, ~40분)
+mcfg extract source.ttf --backend render --full-reference source.ttf \
+    -o ~/work/source.spec.json
+
+# 이후 부분 업데이트 (수초~수십초)
+mcfg extract source.ttf --backend render \
+    --update-spec ~/work/source.spec.json \
+    --refresh-block "Halfwidth/Fullwidth Forms" \
+    --full-reference source.ttf \
+    -o ~/work/source.spec.json   # 같은 파일 덮어쓰면 누적
 ```
 
-## 6. CLI / 코드 통합 지점
+Merge precedence: overlay 가 모든 entry 에서 base 를 이김. base 의 그 외 entry 는 그대로 유지. `spec.source.updateHistory` 에 timestamp + 오버레이 통계 자동 기록.
+
+### 6.1 Monospace block fast-path (자동)
+
+다음 블록이 monospace 면 4-probe 측정 후 블록 전체에 복제 (영역 A 안의 최적화, file 안 봄):
+
+| 블록 | 범위 | NotoSansKR-Bold |
+|---|---|---:|
+| Hangul Syllables | U+AC00..U+D7A3 | 11,172 |
+| CJK Unified Ideographs | U+4E00..U+9FFF | 7,867 |
+| CJK Compatibility Ideographs | U+F900..U+FAFF | 510 |
+| Halfwidth/Fullwidth Forms | U+FF00..U+FFEF | 170 |
+
+24K 글리프 advance probe → 약 16 probe 로 99.9%+ 절감.
+
+LSB 는 음절마다 다르므로 fast-path 가 advance 만 복제하고 LSB 는 글자 단위 single-render.
+
+## 7. CLI / 코드 통합 지점
 
 - `cli.py`: `extract_cmd` 에 `--backend render|file` 추가 (기본 `file`).
 - `extractor.py`: `extract_metrics(...)` 가 `backend="render"` 분기로
   `render_extractor.extract_via_render(...)` 호출.
 - `render_extractor/__init__.py`: `extract_via_render()` 진입점.
+- `render_extractor/incremental.py`: `merge_specs`, `load_spec`, `expand_refresh_set`.
+- `render_extractor/reference.py`: `load_metadata_flags`, `load_pair_list`, `load_unnamed_glyph_metrics`.
 
-## 7. 정확도 검증 전략
+## 8. 정확도 검증 전략
 
 ### Ground-truth diff
 - ground truth = 동일 폰트에 대한 `--backend file` 결과
@@ -348,7 +467,23 @@ mcfg extract <font> --backend render \
 - render extract → generate → validate → 비교
 - end-to-end 회귀 신호
 
-## 8. 단계별 마일스톤 (Phase plan)
+### 8.1 실측 결과 — NotoSansKR-Bold (전체 cmap, 24,853 글리프)
+
+| 메트릭 | **Strict** (`--pixel-only --include-lsb`) | **Full** (`--full-reference`) |
+|---|---:|---:|
+| `font_loadable` | ✓ | ✓ |
+| `glyph_coverage` | 100% | 100% |
+| `advance_widths_match` | ~100% | **100%** (24853/24853) |
+| `lsb_match` | ~99% | **99.94%** (24838/24853) |
+| `kerning_match` | **0%** | **99.94%** (20985/20997) |
+| `shaped_advance` | 0% | ~100% |
+| `vertical_match` | 100% | 100% |
+| `name_metadata` | (없음) | 100% |
+| `global_metrics` | pixel-derivable 만 | 10/11 fields |
+
+**Full 모드 분석 시간**: render extract 37분 + incremental Halfwidth 30초 + unnamed copy 0.5초.
+
+## 9. 단계별 마일스톤 (Phase plan)
 
 | Phase | 산출물 | 검증 게이트 |
 |:---:|---|---|
@@ -360,7 +495,7 @@ mcfg extract <font> --backend render \
 | **P6** | shaped advance + 통합 테스트 + `compare` 자동 diff | 5개 표본 폰트 정확도 회귀 통과 |
 | **P7** | 문서, ROADMAP 갱신, v0.3.0 태그 | 릴리스 |
 
-## 9. 위험과 완화
+## 10. 위험과 완화
 
 | 위험 | 영향 | 완화 |
 |---|---|---|
@@ -371,7 +506,7 @@ mcfg extract <font> --backend render \
 | 페어 후보 누락 | 일부 페어 미복원 | `--pair-list` 사용자 정의 |
 | OS API EULA 해석 차이 | 법적 회색 | 운영 권장은 `browser` |
 
-## 10. 한계 (문서에 명시)
+## 11. 한계 (문서에 명시)
 
 - 정확도: ±1~2 unit 잡음 있음 (file 백엔드 = 정확)
 - 컨텍스트 룩업 (`calt`, chained ctx, mark pos) 복원 **불가**
