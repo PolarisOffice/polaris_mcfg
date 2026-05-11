@@ -5,7 +5,7 @@
 > 본 도구는 **글리프 외형(outline)을 추출/복제하지 않으며**, 숫자 메트릭만 다룹니다 ([라이센스 안전 경계](docs/design/02-metrics-schema.md#라이센스-안전-경계)).
 
 [![CI](https://github.com/PolarisOffice/polaris_mcfg/actions/workflows/ci.yml/badge.svg)](https://github.com/PolarisOffice/polaris_mcfg/actions/workflows/ci.yml)
-[![tests](https://img.shields.io/badge/tests-84%20passed-green)](tests/)
+[![tests](https://img.shields.io/badge/tests-121%20passed-green)](tests/)
 [![demo](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://polarisoffice.github.io/polaris_mcfg/demo/)
 [![python](https://img.shields.io/badge/python-3.10+-blue)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -44,7 +44,7 @@ git clone https://github.com/PolarisOffice/polaris_mcfg
 cd polaris_mcfg
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
-pytest               # 62 tests
+pytest               # 121 tests
 mcfg --help
 ```
 
@@ -52,12 +52,25 @@ mcfg --help
 
 | 서브커맨드 | 설명 |
 |-----------|------|
-| `mcfg extract <font.ttf>` | 메트릭을 JSON 스펙으로 추출 |
+| `mcfg extract <font.ttf>` | 메트릭을 JSON 스펙으로 추출 (기본 `--backend file`) |
+| `mcfg extract <font.ttf> --backend render` | **EULA-safe** 추출: 폰트를 렌더링한 결과 + HarfBuzz shape 로 메트릭 복원. FreeType / Chromium 백엔드. ±1~2u 정확도. |
 | `mcfg compare a b` | 두 폰트(또는 메트릭 JSON) 비교 — text / json / html |
 | `mcfg generate --metrics … --design …` | 메트릭 + 디자인 폰트 → 새 폰트 |
 | `mcfg validate <font> --against …` | 결과 폰트가 메트릭을 만족하는지 검증 |
 
 각 커맨드에 `--help`로 옵션 확인.
+
+### Backend 선택 — file vs render
+
+| | `--backend file` (기본) | `--backend render` (v0.3+) |
+|---|---|---|
+| 추출 방식 | fontTools 로 테이블 직접 파싱 | FreeType / Chromium 렌더링 + HarfBuzz shape |
+| 속도 | 빠름 (수십 ms) | 느림 (수 초 ~ 수십 초) |
+| 정확도 | 정확 (정수 unit) | ±1~2 unit |
+| EULA 가 file parsing 금지하는 폰트 | ❌ | ✅ |
+| 컨텍스트 룩업 (calt, mark pos) | 부분 지원 | 미지원 |
+
+자세한 내용: [docs/design/12-render-extractor.md](docs/design/12-render-extractor.md).
 
 ## 엔드 투 엔드 예시
 

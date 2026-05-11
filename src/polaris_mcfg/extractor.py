@@ -396,31 +396,66 @@ def extract_metrics(
 @click.argument("font", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("-o", "--output", type=click.Path(dir_okay=False, path_type=Path),
               default=None, help="Output JSON path (default: stdout).")
+@click.option("--backend", type=click.Choice(["file", "render"]),
+              default="file", show_default=True,
+              help="Extraction backend. `file` reads font tables directly "
+                   "(fast, exact, but reads file format). `render` measures "
+                   "the font through a rendering pipeline (FreeType / browser) "
+                   "for EULA-safe extraction with ±1-2u accuracy.")
+@click.option("--renderer", type=click.Choice(["auto", "freetype", "browser"]),
+              default="auto", show_default=True,
+              help="Render-backend choice (only used with --backend render).")
+@click.option("--render-size", type=int, default=1000, show_default=True,
+              help="EM size in pixels for the rendering probes "
+                   "(--backend render only).")
+@click.option("--no-detect-monospace", "detect_monospace", flag_value=False,
+              default=True,
+              help="Disable the Hangul-monospace fast-path "
+                   "(--backend render only).")
 @click.option("--include-lsb", is_flag=True, help="Include left side bearings.")
 @click.option("--include-kerning", is_flag=True,
-              help="Include classic `kern` table pairs.")
+              help="Include kerning pairs (file: kern + GPOS PairPos; "
+                   "render: HarfBuzz-shaped ASCII + Korean-punct pairs).")
 @click.option("--include-vertical", is_flag=True,
-              help="Include vhea/vmtx vertical metrics.")
+              help="Include vhea/vmtx vertical metrics (file backend only).")
 @click.option("--include-gsub", is_flag=True,
               help="Detect script/language-specific shape-induced advance "
                    "overrides (e.g., Korean wider space) via HarfBuzz. "
                    "Stored as `shapedAdvances` for opt-in `--apply gsub` "
-                   "in the generator. Slower than other extractors.")
+                   "in the generator. With --backend render, equivalent to "
+                   "--include-shaped.")
+@click.option("--include-shaped", is_flag=True,
+              help="Alias for --include-gsub (used by --backend render).")
 @click.option("--deterministic", is_flag=True,
               help="Fix volatile fields (timestamp) for reproducible output.")
 @click.option("--indent", type=int, default=2, show_default=True)
-def extract_cmd(font: Path, output: Path | None, include_lsb: bool,
+def extract_cmd(font: Path, output: Path | None, backend: str, renderer: str,
+                render_size: int, detect_monospace: bool, include_lsb: bool,
                 include_kerning: bool, include_vertical: bool,
-                include_gsub: bool,
+                include_gsub: bool, include_shaped: bool,
                 deterministic: bool, indent: int) -> None:
-    spec = extract_metrics(
-        font,
-        include_lsb=include_lsb,
-        include_kerning=include_kerning,
-        include_vertical=include_vertical,
-        include_gsub=include_gsub,
-        deterministic=deterministic,
-    )
+    include_shaped_combined = include_gsub or include_shaped
+    if backend == "render":
+        from .render_extractor import extract_via_render
+        spec = extract_via_render(
+            font,
+            renderer=renderer,
+            size_px=render_size,
+            detect_monospace=detect_monospace,
+            include_lsb=include_lsb,
+            include_kerning=include_kerning,
+            include_vertical=include_vertical,
+            include_shaped=include_shaped_combined,
+        )
+    else:
+        spec = extract_metrics(
+            font,
+            include_lsb=include_lsb,
+            include_kerning=include_kerning,
+            include_vertical=include_vertical,
+            include_gsub=include_shaped_combined,
+            deterministic=deterministic,
+        )
     text = spec.to_json(indent=indent)
     if output is None:
         click.echo(text)

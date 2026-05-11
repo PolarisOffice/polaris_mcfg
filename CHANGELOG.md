@@ -2,6 +2,88 @@
 
 All notable changes to Polaris MCFG.
 
+## [0.3.0] — 2026-05-11 — M8 render-based extractor
+
+EULA-safe metric extraction: instead of reading font tables directly,
+this release adds a parallel extraction backend that measures the font
+through normal rendering pipelines (FreeType, Playwright/Chromium) and
+recovers metrics from pixel measurements + HarfBuzz shaping output.
+
+### Added — `mcfg extract --backend render`
+
+- **FreeType backend** (`--renderer freetype`): rasterizes each cmap
+  glyph via FT, measures advance via AAAA linear-fit pattern (±0.25 px),
+  per-glyph LSB from ink bbox vs pen position. Works with hinting off
+  for sub-pixel precision.
+- **Browser backend** (`--renderer browser`): Chromium loads the font
+  via `@font-face` data: URL — our code never opens the font file.
+  Strongest EULA defense in the suite. Screenshots are measured the
+  same way as FreeType output.
+- **Hangul monospace fast-path** (`--detect-monospace`, default on):
+  probes `가뷁이왈`, replicates the common advance to the 11,172
+  Hangul Syllables block if all four agree. Per-syllable LSB still
+  measured individually (cheap single render). 30%+ speedup on Korean
+  fonts.
+- **Kerning** (`--include-kerning`): default candidate set of
+  ASCII × ASCII + ASCII × Korean-punctuation + Korean-punct × ASCII
+  pairs (~14K), shaped through HarfBuzz, filtered by 2-unit threshold.
+  Captures both classic `kern` and GPOS PairPos correctly by reading
+  total pair advance (handles HB's classic-kern advance/offset split).
+- **Shaped advances** (`--include-shaped` / `--include-gsub`): per-
+  (codepoint, script, language) advance overrides via HB shaping.
+  Functionally identical to the file backend's GSUB extraction.
+- **Auto-cmap**: when called without an explicit codepoint list, reads
+  the font's `cmap` table only (numeric whitelist — no outline data).
+
+### Architecture
+
+```
+src/polaris_mcfg/render_extractor/
+  __init__.py          # extract_via_render() entry point
+  orchestrator.py      # decides what to render and assembles the spec
+  backends/
+    base.py            # RenderBackend ABC + dataclasses
+    freetype_backend.py
+    browser_backend.py
+  analyzer.py          # pixel-bbox + N-repeat linear-fit advance
+  units.py             # pixel → font-unit conversion
+  kerning.py           # HB pair shaping + threshold filter
+  shaped.py            # HB context shaping for shapedAdvances
+```
+
+### Design
+
+- `docs/design/12-render-extractor.md` — full design (architecture,
+  EULA boundary, per-metric measurement procedure, accuracy gates,
+  risks).
+
+### Tests
+
+89 → 121. New `tests/render_extractor/` covers P1-P6:
+- backend wiring + FreeType advance ±1u on synth + NotoSansKR
+- vertical / advance / LSB on synth + real-font regression
+- Hangul monospace detection + replication + perf
+- kerning recovery with HB pair distribution (-100 → captured exact)
+- browser ↔ FreeType cross-backend agreement (±1u)
+- shaped advance parity with file backend (byte-identical via HB)
+- full pipeline regression on NotoSansKR-Bold: 13 codepoints, advance
+  ≤ 2u, LSB ≤ 5u, kerning exact
+
+### CLI
+
+- `mcfg extract --backend [file|render]` (default `file`).
+- `--renderer [auto|freetype|browser]`, `--render-size N`,
+  `--no-detect-monospace`, `--include-shaped`.
+- All other flags work in both backends.
+
+### Optional dependencies (`pyproject.toml`)
+
+- `[render-extract]`: `freetype-py`, `Pillow`, `numpy`.
+- `[render-extract-browser]`: `playwright`, `Pillow`, `numpy`.
+- `[dev]` pulls in both for the full test matrix.
+
+---
+
 ## [0.2.5] — 2026-05-11 — public release tag
 
 First tagged release after the repository moved to `PolarisOffice/polaris_mcfg`
