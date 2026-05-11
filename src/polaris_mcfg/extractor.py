@@ -417,6 +417,29 @@ def extract_metrics(
               help="Dump each rendered probe to this directory as PNG "
                    "(--backend render only). Useful for debugging / "
                    "verifying which images the extractor actually measured.")
+@click.option("--metadata-from", "metadata_from",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help="Copy classification flags (head/hhea/OS-2/post tags: "
+                   "italicAngle, fsSelection, usWeightClass, ulUnicodeRange, "
+                   "etc.) from this font into the spec. Closes the small gap "
+                   "between pixel-measurable global metrics and the source "
+                   "font's declared style tags. --backend render only.")
+@click.option("--pair-list-from", "pair_list_from",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help="Read the kerning pair *list* (left/right codepoint "
+                   "tuples — values not read) from this font and add them to "
+                   "the render extractor's candidate set. Required to reach "
+                   "full kerning coverage on fonts with class-based GPOS "
+                   "pairs (e.g. CJK fonts with 20K+ pairs). --backend "
+                   "render only.")
+@click.option("--full-reference", "full_reference",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help="Shorthand for both --metadata-from and --pair-list-from "
+                   "pointing at the same font. The conventional way to ask "
+                   "for full-fidelity render extraction.")
 @click.option("--include-lsb", is_flag=True, help="Include left side bearings.")
 @click.option("--include-kerning", is_flag=True,
               help="Include kerning pairs (file: kern + GPOS PairPos; "
@@ -436,6 +459,8 @@ def extract_metrics(
 @click.option("--indent", type=int, default=2, show_default=True)
 def extract_cmd(font: Path, output: Path | None, backend: str, renderer: str,
                 render_size: int, detect_monospace: bool, workdir: Path | None,
+                metadata_from: Path | None, pair_list_from: Path | None,
+                full_reference: Path | None,
                 include_lsb: bool, include_kerning: bool,
                 include_vertical: bool, include_gsub: bool,
                 include_shaped: bool,
@@ -453,6 +478,9 @@ def extract_cmd(font: Path, output: Path | None, backend: str, renderer: str,
             include_vertical=include_vertical,
             include_shaped=include_shaped_combined,
             workdir=workdir,
+            metadata_from=metadata_from,
+            pair_list_from=pair_list_from,
+            full_reference=full_reference,
         )
     else:
         spec = extract_metrics(

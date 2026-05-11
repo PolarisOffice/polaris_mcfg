@@ -43,19 +43,48 @@ from .kerning import (
     default_pair_candidates,
     extract_kerning_pairs,
 )
+from .reference import (
+    load_metadata_flags,
+    load_pair_list,
+    merge_metadata_into_globals,
+)
 from .shaped import DEFAULT_SHAPING_CONTEXTS, extract_shaped_advances
 from .units import pixel_to_unit, pixel_to_unit_float
 
 # Default characters used for vertical-metric probing.
 DEFAULT_VERT_REFS = {"cap": "H", "x": "x", "desc": "g", "asc": "l"}
 
-# Hangul monospace probe set. If all four advances are within ±1 px the
-# Hangul block is treated as monospace and only "가" is measured for the
-# full 11,172 syllables.
-HANGUL_MONOSPACE_PROBES = ("가", "뷁", "이", "왈")
 
-#: Hangul Syllables block: U+AC00 .. U+D7A3 (11,172 chars).
-HANGUL_SYLLABLES_RANGE = range(0xAC00, 0xD7A4)
+#: One monospace-candidate block. Every CJK-class font has a few of
+#: these — large unicode ranges where advance is uniform 1000u
+#: (one-em-square per glyph). When all four probe codepoints have the
+#: same measured advance the orchestrator treats the whole block as
+#: monospace and replicates the common value to every codepoint in
+#: ``range``, skipping per-glyph measurement.
+#:
+#: Probe codepoints are chosen for ink-shape diversity within each
+#: block (simple vs complex outline) — that maximizes the chance of
+#: detecting non-monospace fonts that happen to share the simple
+#: probes' advance.
+MONOSPACE_BLOCKS: tuple[tuple[str, range, tuple[str, ...]], ...] = (
+    ("Hangul Syllables",
+     range(0xAC00, 0xD7A4),
+     ("가", "뷁", "이", "왈")),
+    ("CJK Unified Ideographs",
+     range(0x4E00, 0xA000),
+     ("一", "永", "鬱", "齉")),
+    ("CJK Compatibility Ideographs",
+     range(0xF900, 0xFB00),
+     ("豈", "更", "車", "說")),
+    ("Halfwidth/Fullwidth Forms",
+     range(0xFF00, 0xFFF0),
+     ("！", "Ａ", "ｚ", "／")),
+)
+
+# Back-compat alias: legacy code paths import HANGUL_MONOSPACE_PROBES
+# directly. Keep it pointing at the Hangul block's probes.
+HANGUL_MONOSPACE_PROBES = MONOSPACE_BLOCKS[0][2]
+HANGUL_SYLLABLES_RANGE = MONOSPACE_BLOCKS[0][1]
 
 
 def _open_backend(font_path: Path, renderer: str,
@@ -154,9 +183,28 @@ def _hangul_is_monospace(backend: RenderBackend, size_px: int = 1000,
     """Decide whether the Hangul syllables block is uniform-advance.
 
     Returns ``(is_monospace, common_advance_px_or_None)``.
+
+    Kept for back-compat with P3-era callers. New code should use
+    :func:`_block_is_monospace` and iterate ``MONOSPACE_BLOCKS``.
     """
-    advances = []
-    for probe in HANGUL_MONOSPACE_PROBES:
+    return _block_is_monospace(backend, HANGUL_MONOSPACE_PROBES,
+                               size_px=size_px, tolerance_px=tolerance_px)
+
+
+def _block_is_monospace(backend: RenderBackend, probes: tuple[str, ...],
+                        size_px: int = 1000,
+                        tolerance_px: float = 1.0,
+                        ) -> tuple[bool, float | None]:
+    """Decide whether a unicode block is uniform-advance.
+
+    Renders each probe codepoint and compares advances. If all probes
+    are within ``tolerance_px`` of each other (and none failed), the
+    block is treated as monospace and the common advance is returned.
+    Otherwise returns ``(False, None)`` and the orchestrator falls back
+    to measuring every codepoint individually.
+    """
+    advances: list[float] = []
+    for probe in probes:
         try:
             adv = probe_advance(backend, probe, size_px=size_px)
         except Exception:
@@ -243,6 +291,7 @@ def _partition_hangul_syllables(cmap: list[int]) -> tuple[list[int], list[int]]:
     """Split a cmap into ``(hangul_syllables, other)``.
 
     Hangul Syllables block = U+AC00 .. U+D7A3 (11,172 chars).
+    Back-compat helper; new code uses :func:`_partition_by_blocks`.
     """
     hangul: list[int] = []
     other: list[int] = []
@@ -252,6 +301,29 @@ def _partition_hangul_syllables(cmap: list[int]) -> tuple[list[int], list[int]]:
         else:
             other.append(cp)
     return hangul, other
+
+
+def _partition_by_blocks(
+    cmap: list[int],
+    blocks: tuple[tuple[str, range, tuple[str, ...]], ...] = MONOSPACE_BLOCKS,
+) -> tuple[dict[str, list[int]], list[int]]:
+    """Split ``cmap`` into ``({block_name: [cps]}, leftover)``.
+
+    A codepoint goes into the first block whose ``range`` contains it.
+    Anything that matches no block ends up in ``leftover``.
+    """
+    by_block: dict[str, list[int]] = {name: [] for name, _r, _p in blocks}
+    leftover: list[int] = []
+    for cp in cmap:
+        placed = False
+        for name, rng, _probes in blocks:
+            if cp in rng:
+                by_block[name].append(cp)
+                placed = True
+                break
+        if not placed:
+            leftover.append(cp)
+    return by_block, leftover
 
 
 def extract_via_render(
@@ -273,6 +345,9 @@ def extract_via_render(
     include_shaped: bool = False,
     shaping_contexts: tuple[tuple[str, str], ...] = DEFAULT_SHAPING_CONTEXTS,
     workdir: str | Path | None = None,
+    metadata_from: str | Path | None = None,
+    pair_list_from: str | Path | None = None,
+    full_reference: str | Path | None = None,
 ) -> MetricsSpec:
     """Render-based extraction.
 
@@ -303,67 +378,101 @@ def extract_via_render(
     """
     font_path = Path(font_path)
 
+    # --full-reference FILE is shorthand for both --metadata-from FILE
+    # and --pair-list-from FILE (most callers want both together).
+    if full_reference is not None:
+        if metadata_from is None:
+            metadata_from = full_reference
+        if pair_list_from is None:
+            pair_list_from = full_reference
+
     if cmap is None:
         cmap = _enumerate_cmap_from_font(font_path)
     cmap = list(cmap)
     if max_glyphs is not None:
         cmap = cmap[:max_glyphs]
 
+    # Load file-derived metadata flags (head/hhea/OS-2/post tags) if
+    # requested. These are merged into the measured global metrics
+    # with file values winning. See reference.py for the EULA
+    # discussion.
+    metadata_flags: dict[str, dict] | None = None
+    if metadata_from is not None:
+        metadata_flags = load_metadata_flags(metadata_from)
+
     with _open_backend(font_path, renderer, workdir=Path(workdir) if workdir else None) as backend:
         reported_upem = backend.reported_upem()
         upem_used = reported_upem if reported_upem is not None else upem
 
-        # Global / vertical metrics (single render)
+        # Global / vertical metrics (single render). When metadata_flags
+        # is set, the source font's declared values win on the fields it
+        # specifies (ascent/descent/cap height/etc.), keeping our pixel
+        # measurements as fallback for whatever the file doesn't declare.
         global_dicts = _measure_global(backend, size_px=size_px, upem=upem_used)
+        if metadata_flags is not None:
+            global_dicts = merge_metadata_into_globals(
+                global_dicts, metadata_flags)
 
         glyphs: dict[str, GlyphMetric] = {}
         # Pixel-space advances retained for downstream kerning measurement
         # (the kerning measurer needs left-glyph advance in *pixels*, not
         # in font units, to compute the cursor delta).
         advances_px: dict[int, float] = {}
+        # Per-block monospace detection results, exposed via spec.source
+        # for transparency / debuggability.
+        monospace_detected: dict[str, dict] = {}
+
+        # Generalized monospace fast-path: try each block in
+        # MONOSPACE_BLOCKS. For each that probes as uniform-advance,
+        # replicate the common advance to every cmap codepoint in the
+        # block's range. LSB is still measured per-glyph (within a
+        # monospace advance block, ink positions differ).
+        cmap_to_measure: list[int] = list(cmap)
+        # Back-compat: the source dict's "hangulMonospace" field is set
+        # specifically when the Hangul block fast-paths.
         hangul_monospace_used = False
         hangul_common_advance: int | None = None
-        hangul_common_advance_px: float | None = None
-
-        # Hangul fast-path: if the Syllables block is monospace, measure
-        # one syllable and replicate to the other 11,171.
         if detect_monospace:
-            hangul_cps, other_cps = _partition_hangul_syllables(cmap)
-            if len(hangul_cps) >= len(HANGUL_MONOSPACE_PROBES):
-                is_mono, common_px = _hangul_is_monospace(
-                    backend, size_px=size_px)
-                if is_mono and common_px is not None:
+            by_block, leftover = _partition_by_blocks(cmap)
+            cmap_to_measure = list(leftover)
+            for name, rng, probes in MONOSPACE_BLOCKS:
+                block_cps = by_block[name]
+                if len(block_cps) < len(probes):
+                    # Not enough block coverage to bother probing
+                    cmap_to_measure.extend(block_cps)
+                    continue
+                is_mono, common_px = _block_is_monospace(
+                    backend, probes, size_px=size_px)
+                if not (is_mono and common_px is not None):
+                    cmap_to_measure.extend(block_cps)
+                    continue
+                common_units = pixel_to_unit(
+                    common_px, size_px=size_px, upem=upem_used)
+                monospace_detected[name] = {
+                    "detected": True,
+                    "commonAdvance": common_units,
+                    "codepoints": len(block_cps),
+                }
+                if name == "Hangul Syllables":
                     hangul_monospace_used = True
-                    hangul_common_advance_px = common_px
-                    hangul_common_advance = pixel_to_unit(
-                        common_px, size_px=size_px, upem=upem_used)
-                    # Replicate ADVANCE across the block. LSB is per-syllable
-                    # even when advance is uniform (Korean syllables share
-                    # the same advance box but the ink position inside it
-                    # varies), so we still single-render each syllable for
-                    # LSB if include_lsb=True. Even so, the per-syllable LSB
-                    # probe is ~4× cheaper than the 4-repeat advance probe,
-                    # so the fast-path still pays off.
-                    for cp in hangul_cps:
-                        lsb_units: int | None = None
-                        if include_lsb:
-                            lsb_px = probe_lsb_only(
-                                backend, chr(cp), size_px=size_px)
-                            if lsb_px is not None:
-                                lsb_units = pixel_to_unit(
-                                    lsb_px, size_px=size_px, upem=upem_used)
-                        glyphs[codepoint_to_id(cp)] = GlyphMetric(
-                            advanceWidth=hangul_common_advance,
-                            lsb=lsb_units,
-                        )
-                        advances_px[cp] = common_px
-                    cmap_to_measure = other_cps
-                else:
-                    cmap_to_measure = cmap
-            else:
-                cmap_to_measure = cmap
-        else:
-            cmap_to_measure = cmap
+                    hangul_common_advance = common_units
+                # Replicate advance, single-render LSB per glyph.
+                for i, cp in enumerate(block_cps):
+                    lsb_units: int | None = None
+                    if include_lsb:
+                        lsb_px = probe_lsb_only(
+                            backend, chr(cp), size_px=size_px)
+                        if lsb_px is not None:
+                            lsb_units = pixel_to_unit(
+                                lsb_px, size_px=size_px, upem=upem_used)
+                    glyphs[codepoint_to_id(cp)] = GlyphMetric(
+                        advanceWidth=common_units,
+                        lsb=lsb_units,
+                    )
+                    advances_px[cp] = common_px
+                    if progress and (i + 1) % 1000 == 0:
+                        print(f"  ... {name} LSB {i + 1}/{len(block_cps)}",
+                              flush=True)
 
         for i, cp in enumerate(cmap_to_measure):
             ch = chr(cp)
@@ -392,6 +501,20 @@ def extract_via_render(
     if include_kerning and not skip_kerning:
         if pair_candidates is None:
             pair_candidates = default_pair_candidates(cmap=cmap)
+        # Augment candidates with the source font's actual pair list
+        # when --pair-list-from is set. The merge is a set union over
+        # (left, right) tuples so neither side loses pairs.
+        if pair_list_from is not None:
+            ref_pairs = load_pair_list(pair_list_from)
+            existing = {(p.left, p.right) for p in pair_candidates}
+            cmap_set = set(cmap)
+            for (l, r) in ref_pairs:
+                if l not in cmap_set or r not in cmap_set:
+                    continue
+                if (l, r) in existing:
+                    continue
+                pair_candidates.append(PairCandidate(l, r))
+                existing.add((l, r))
         if progress:
             print(f"  measuring {len(pair_candidates)} kerning pairs...")
         kerning = extract_kerning_pairs(
@@ -430,6 +553,12 @@ def extract_via_render(
             "syllablesReplicated": sum(
                 1 for cp in cmap if 0xAC00 <= cp <= 0xD7A3),
         }
+    if monospace_detected:
+        source["monospaceBlocks"] = monospace_detected
+    if metadata_from is not None:
+        source["metadataReference"] = str(Path(metadata_from).name)
+    if pair_list_from is not None:
+        source["pairListReference"] = str(Path(pair_list_from).name)
     spec = MetricsSpec(
         source=source,
         global_metrics=global_metrics,
