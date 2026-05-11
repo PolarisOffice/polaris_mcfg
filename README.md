@@ -5,7 +5,7 @@
 > 본 도구는 **글리프 외형(outline)을 추출/복제하지 않으며**, 숫자 메트릭만 다룹니다 ([라이센스 안전 경계](docs/design/02-metrics-schema.md#라이센스-안전-경계)).
 
 [![CI](https://github.com/PolarisOffice/polaris_mcfg/actions/workflows/ci.yml/badge.svg)](https://github.com/PolarisOffice/polaris_mcfg/actions/workflows/ci.yml)
-[![tests](https://img.shields.io/badge/tests-150%20passed-green)](tests/)
+[![tests](https://img.shields.io/badge/tests-154%20passed-green)](tests/)
 [![demo](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://polarisoffice.github.io/polaris_mcfg/demo/)
 [![python](https://img.shields.io/badge/python-3.10+-blue)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -44,7 +44,7 @@ git clone https://github.com/PolarisOffice/polaris_mcfg
 cd polaris_mcfg
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
-pytest               # 150 tests
+pytest               # 154 tests
 mcfg --help
 ```
 
@@ -72,44 +72,55 @@ mcfg --help
 
 자세한 내용: [docs/design/12-render-extractor.md](docs/design/12-render-extractor.md).
 
-### EULA 두 영역 — "정상 rendering" vs "internal table 분석"
+### 두 가지 모드 — Strict 또는 Full
 
-폰트 데이터에 대한 행위는 두 영역으로 정확히 나뉩니다:
+영역 A (정상 rendering 출력) vs 영역 B (internal table 직접 분석) 의 boundary 가 sharp 하고, 영역 A 안에서 휴리스틱 만으로는 CJK 폰트에서 5% 미만 복원율이라 **운영상 의미 있는 모드는 두 개뿐**입니다:
 
-**영역 A — 정상 rendering 의 출력 사용** (모든 OS/브라우저가 매일 함):
-- 픽셀 측정 (FreeType / Chromium 렌더 결과)
-- HarfBuzz shape() 결과 (positioning numeric)
-- → **두 결과는 등가 정보**. 시각적 텍스트에 이미 적용된 효과를 numeric 으로 받느냐 픽셀로 보느냐의 차이뿐.
-- → EULA 위반으로 해석하면 폰트 자체 사용 불가능
+```bash
+# ─── Strict 모드 ────────────────────────────────────
+# EULA 가 metric extraction / reverse engineering 명시 금지하는 폰트용
+# (일부 한컴 폰트, 사내 전용 폰트 등)
+mcfg extract source.ttf --backend render --pixel-only --include-lsb \
+     -o spec.json
+# → 영역 A 만. ~80% 복원 (advance + LSB + vertical + italic + underline)
+# → kerning / shaped advance / unnamed glyph 미복원
 
-**영역 B — Rendering 시 노출되지 않는 internal data 의 직접 분석**:
-- 페어 list (`kern` table 또는 `GPOS` PairPos lookup 안의 페어 tuple list)
-- 분류 메타데이터 (`head`/`hhea`/`OS/2`/`post` 의 enum/flag field)
-- Unnamed glyph metric (cmap 외 글리프의 `hmtx` 값)
-- → 정상 rendering 의 출력에 노출되지 않는 폰트 internal lookup 데이터
-- → reverse engineering 으로 분류됨
+# ─── Full 모드 ──────────────────────────────────────
+# EULA 가 허용하는 폰트용 (대부분의 OFL, 일반 상용 폰트)
+mcfg extract source.ttf --backend render --full-reference source.ttf \
+     -o spec.json
+# → 영역 A + B 모두. ~100% 복원
+# → --full-reference 가 자동으로 include_lsb, include_kerning,
+#    include_shaped 활성화
+```
 
-### 4가지 모드 매트릭스
+### 두 모드 비교
 
-| 모드 | Pair 후보 enumeration | Pair 값 측정 | 사용 영역 | Kerning 복원율 (CJK) | Kerning 복원율 (Latin) |
-|---|---|---|---|---:|---:|
-| `--pixel-only` (FreeType) | (시도 안 함) | (불가) | **영역 A** | 0% | 0% |
-| (기본, `--include-kerning`) | **하드코딩 휴리스틱** (~11.6K, ASCII × ASCII + ASCII × Korean punct) | HB shape | **영역 A** | **~5%** (NotoSansKR), **~0.3%** (Pretendard) | 70~95% |
-| `--pair-list-from FILE` | **폰트 file 의 internal lookup** (~20K-400K, 전체 페어) | HB shape | 영역 A + **영역 B** | ~100% | ~100% |
-| `--unnamed-from FILE` / `--metadata-from FILE` | (kerning 무관) | n/a | **영역 B** | +unnamed / +metadata | +unnamed / +metadata |
-| `--backend file` | 전체 file parsing | 전체 file parsing | 전체 **영역 B** | 100% (정수 정확) | 100% (정수 정확) |
+| | **Strict** (`--pixel-only`) | **Full** (`--full-reference`) |
+|---|---|---|
+| 영역 사용 | A 만 (rendering 결과) | A + B (rendering + internal table) |
+| advance / LSB / vertical | ~100% | ~100% |
+| kerning | **0** | **~100%** |
+| shaped advance | 0 | ~100% |
+| unnamed glyph metric | 0 | ~100% |
+| 메타데이터 분류 플래그 | pixel-derivable 만 | ~100% |
+| **EULA 권장 폰트** | metric extraction 명시 금지 | 일반 폰트 (OFL 등) |
 
-> **CJK 폰트는 휴리스틱으로 사실상 kerning 복원 불가**:
-> - NotoSansKR-Bold (총 20,997 페어): 휴리스틱이 1,038개 (5%) 만 겹침. 19.9K 는 한자-한자 클래스 페어, Hangul-Latin 크로스, Cyrillic 페어 — 휴리스틱이 가정한 ASCII 영역 밖.
-> - Pretendard (총 400K+ 페어, GPOS class kerning expanded): 휴리스틱 0.3% 만 겹침.
-> - **CJK 폰트의 kerning 을 제대로 복원하려면 `--pair-list-from` (영역 B) 사실상 필수**.
+### 왜 중간이 없는가
 
-> **핵심 — 페어 list 읽기 vs HB shape 는 완전히 다른 행위**:
-> - 기본 모드는 **페어 list 를 읽지 않습니다**. 후보는 우리 코드의 하드코딩 휴리스틱이고, HB shape 로 각 후보의 값만 측정합니다.
-> - `--pair-list-from FILE` 만이 폰트 file 의 internal pair list 를 추출합니다 (영역 B).
-> - `--pixel-only` 와 기본의 차이는 **HB shape 호출 여부**입니다 (페어 list 읽기 여부 아님).
+- **휴리스틱 default (영역 A 안)**: NotoSansKR 의 GPOS 페어 21K 중 ASCII × ASCII 영역이 1K (5%). 한자-한자 클래스 페어 19.9K 는 잡지 못함. **CJK 폰트에서 사실상 무용**.
+- **외부 페어 list 입력 (영역 A 안)**: 어차피 그 list 도 어딘가의 file 분석 결과. 결국 영역 B 정보.
+- **그래서 의미 있는 선택은 Strict (kerning 포기) 또는 Full (영역 B 포함) 둘 뿐**.
 
-> **HB shape 자체는 정상 rendering 의 일부**로 EULA 안전 영역. 결정적 EULA 위험은 `--pair-list-from` / `--unnamed-from` / `--metadata-from` / `--backend file` 처럼 **rendering 출력 외의 internal table 데이터를 직접 추출하는 행위**입니다.
+### 영역의 의미
+
+| 영역 A — 정상 rendering 출력 | 영역 B — Internal table 직접 분석 |
+|---|---|
+| 픽셀 측정 (FreeType / Chromium 렌더 결과) | 페어 list (`kern` + `GPOS PairPos` 안의 페어 tuple) |
+| HarfBuzz shape() 결과 (positioning numeric) | 메타데이터 (`head`/`hhea`/`OS/2`/`post` enum) |
+| ↑ Chrome/Firefox/OS 가 매일 호출 | unnamed glyph metric (cmap 외 `hmtx` 값) |
+| ↑ 픽셀에서도 같은 정보 얻을 수 있음 | ↑ Rendering 시 노출되지 않는 internal lookup |
+| **EULA 안전** | **reverse engineering 영역** |
 
 **권장 사용**:
 
@@ -120,20 +131,22 @@ mcfg --help
 
 자세한 layer 별 EULA 분석: [docs/design/12-render-extractor.md §1](docs/design/12-render-extractor.md#1-라이센스-안전-경계).
 
-### Render 백엔드 옵션 매트릭스
+### Render 백엔드 옵션 (advanced)
+
+대부분은 두 권장 모드 (`--pixel-only` 또는 `--full-reference`) 면 충분합니다. 세부 제어가 필요한 경우:
 
 | 옵션 | 효과 |
 |---|---|
 | `--renderer [auto\|freetype\|browser]` | 렌더 엔진 선택. browser 는 가장 강한 EULA 방어선 (Chromium `@font-face` data: URL 로 적재). |
 | `--render-size N` | 측정 정밀도 — 1000px (기본) → 1u 정확도. |
 | `--workdir DIR` | 측정에 사용된 모든 PNG 를 DIR 에 dump. 디버그 / 검증용. |
-| `--include-lsb` | per-glyph LSB 측정 추가 |
-| `--include-kerning` | HB pair shape 으로 페어 간격 측정 (`--pixel-only` 시 자동 비활성) |
-| `--include-shaped` | 언어 컨텍스트별 advance 변화 (`--pixel-only` 시 자동 비활성) |
-| `--metadata-from FILE` | head/hhea/OS-2/post 분류 플래그 numeric copy |
-| `--pair-list-from FILE` | 페어 후보 list numeric copy (값은 HB 가 측정) |
-| `--unnamed-from FILE` | cmap 외 글리프 (notdef variants 등) 의 advance/LSB numeric copy |
-| `--full-reference FILE` | 위 셋의 shorthand |
+| `--include-lsb` | per-glyph LSB 측정 추가 (Strict 모드에서 명시) |
+| `--include-kerning` | HB pair shape 으로 페어 간격 측정 (휴리스틱 후보, CJK 에선 ~5% 만 잡음 — `--full-reference` 권장) |
+| `--include-shaped` | 언어 컨텍스트별 advance 변화 |
+| `--metadata-from FILE` | head/hhea/OS-2/post 분류 플래그 numeric copy (`--full-reference` 의 일부) |
+| `--pair-list-from FILE` | 페어 후보 list numeric copy (`--full-reference` 의 일부) |
+| `--unnamed-from FILE` | cmap 외 글리프 (notdef variants 등) 의 advance/LSB numeric copy (`--full-reference` 의 일부) |
+| `--full-reference FILE` | 위 셋 + `--include-lsb --include-kerning --include-shaped` 자동 활성화. **Full 모드의 단일 옵션** |
 
 ### Incremental 업데이트 (v0.3.2+)
 
@@ -174,29 +187,23 @@ mcfg extract source.ttf --backend render \
 
 24K 글리프 advance probe → 약 16 probe 로 99.9%+ 절감.
 
-### 실측 정확도 — NotoSansKR-Bold (전체 cmap)
+### 실측 정확도 — NotoSansKR-Bold (전체 cmap, 24,853 글리프)
 
-`--full-reference source.ttf` 사용 시 (영역 A + 영역 B 모두 활용):
+| 메트릭 | **Strict** (`--pixel-only --include-lsb`) | **Full** (`--full-reference`) |
+|---|---:|---:|
+| `font_loadable` | ✓ | ✓ |
+| `glyph_coverage` | 100% | 100% |
+| `advance_widths_match` | ~100% | **100%** (24853/24853) |
+| `lsb_match` | ~99% | **99.94%** (24838/24853) |
+| `kerning_match` | **0%** | **99.94%** (20985/20997) |
+| `shaped_advance` | 0% | ~100% |
+| `vertical_match` | 100% | 100% |
+| `name_metadata` | (없음) | 100% |
+| `global_metrics` | pixel-derivable 만 (cap/x-height 등) | 10/11 fields (head.flags 만 fontTools 자동 재계산) |
 
-| 메트릭 | 매치 비율 | 비고 |
-|---|---:|---|
-| `font_loadable` | ✓ | — |
-| `glyph_coverage` | 100% | — |
-| `advance_widths_match` | **100%** (24853/24853) | 모든 글자 너비 정확 |
-| `lsb_match` | **99.94%** (24838/24853) | 잔여 15 측정 잡음 |
-| `kerning_match` | **99.94%** (20985/20997) | 12 페어 누락 (base spec 잔재) |
-| `vertical_match` | 100% | — |
-| `name_metadata` | 100% | — |
-| `global_metrics` | 10/11 fields | head.flags 만 fontTools 자동 재계산 |
+**분석 시간 (Full 모드)**: render extract 37분 + incremental Halfwidth 30초 + unnamed copy 0.5초.
 
-전체 분석 시간: **render extract 37분 + incremental Halfwidth 30초 + unnamed copy 0.5초**.
-
-`--full-reference` 없이 기본 모드 (영역 A 만, EULA-safe) 사용 시:
-- advance/LSB/vertical: 동일 (~100%)
-- **kerning: ~5%** (휴리스틱이 NotoSansKR 의 ASCII × ASCII 페어 1K 만 잡고, 한자-한자 페어 19.9K 누락)
-- shaped advance: ~50% (cmap 의 일반 codepoint 만, language-specific 변화는 잡지만 unnamed glyph 미포함)
-
-CJK 폰트의 kerning 100% 가 EULA 우선이라면 — kerning 복원 포기하거나, file 백엔드 사용 가능한 폰트만 대상으로 함.
+> Strict 모드의 한계: NotoSansKR-Bold 의 GPOS PairPos 21K 페어 (한자-한자 클래스 페어 19.9K 포함) 를 모두 잡으려면 영역 B (`--full-reference`) 필요. Strict 모드는 그 정보를 포기하는 대신 EULA-strictest 영역에 머무릅니다.
 
 ## 엔드 투 엔드 예시
 

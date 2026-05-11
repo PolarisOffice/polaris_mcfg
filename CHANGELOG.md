@@ -2,6 +2,61 @@
 
 All notable changes to Polaris MCFG.
 
+## [0.3.4] — 2026-05-11 — two-mode simplification + empirical heuristic limits
+
+After measuring the heuristic-candidate kerning coverage against
+real CJK fonts in `fonts/`:
+
+  Font                   total pairs   heuristic ∩   coverage
+  NotoSansKR-Bold         20,997           1,038        5.0%
+  Pretendard-Regular     402,119           1,071        0.3%
+
+it became clear that the "default mode with --include-kerning" path
+(region A heuristic) is **not operationally meaningful on CJK fonts**.
+The four-mode matrix collapses to two:
+
+  Strict:  --pixel-only --include-lsb
+           Region A only, EULA-strictest, ~80% coverage
+           (no kerning, no shaped advance)
+
+  Full:    --full-reference SOURCE.ttf
+           Regions A + B, byte-for-byte file-backend equivalence,
+           ~100% coverage
+
+### Changed
+
+- `--full-reference FILE` now auto-enables `--include-lsb`,
+  `--include-kerning`, `--include-shaped`. One flag = Full mode.
+- `--pixel-only` + `--full-reference` interaction: pixel-only wins
+  for kerning/shaped/reference-from (consistent with EULA-strictest
+  intent). LSB auto-enable from full-reference is suppressed too —
+  caller can opt in explicitly with `--include-lsb`.
+
+### Documentation
+
+- README "두 가지 모드" section replaces the 4-mode matrix. Single-
+  command examples for Strict and Full. Explicit explanation of why
+  middle modes (heuristic alone, external pair list) are not
+  operationally meaningful.
+- design doc 12 §1.4 collapsed to two-mode mapping with measured
+  coverage. Old `--include-kerning` alone path documented but marked
+  as "수동 조합, CJK 폰트에서 의미 없음".
+- README "실측 정확도" section restructured as two-column comparison
+  (Strict vs Full).
+
+### Tests
+
+150 → 154 (+4 in P11):
+- `--full-reference` auto-enables include_lsb/include_kerning/
+  include_shaped
+- Strict mode (`--pixel-only --include-lsb`) produces region-A-only
+  spec
+- `--pixel-only` + `--full-reference` together: strict wins
+- `--pixel-only` + `--full-reference` without explicit `--include-lsb`:
+  LSB stays off (pixel-only suppresses full-reference's auto-enable)
+
+---
+
 ## [0.3.3] — 2026-05-11 — pixel-only mode + EULA layer documentation
 
 Adds the strictest-EULA mode for fonts whose license explicitly forbids

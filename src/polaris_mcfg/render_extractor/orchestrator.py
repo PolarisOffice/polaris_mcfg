@@ -426,8 +426,14 @@ def extract_via_render(
         unnamed_from = None
         full_reference = None
 
-    # --full-reference FILE is shorthand for both --metadata-from FILE
-    # and --pair-list-from FILE (most callers want both together).
+    # --full-reference FILE is the "Full mode" preset: one flag turns
+    # the render extractor into the byte-for-byte file-backend equivalent.
+    # We auto-enable every include-* the file backend would supply, plus
+    # all three reference sources. The empirical reality is that two
+    # modes are operationally meaningful — Strict (--pixel-only, ~80%
+    # coverage, region A only) and Full (--full-reference, ~100%, region
+    # A + B) — and we shouldn't make the user remember which include-*
+    # flags to combine with --full-reference.
     if full_reference is not None:
         if metadata_from is None:
             metadata_from = full_reference
@@ -435,6 +441,14 @@ def extract_via_render(
             pair_list_from = full_reference
         if unnamed_from is None:
             unnamed_from = full_reference
+        # Auto-enable include-* (region A measurement of metrics that
+        # the references will also supply). The result spec merges
+        # rendered values with file-backend references — same as if the
+        # user had explicitly set all three flags.
+        include_lsb = True
+        if not pixel_only:
+            include_kerning = True
+            include_shaped = True
 
     # Incremental update mode: load the base spec; if refresh_* is set,
     # restrict cmap to just the codepoints we want to re-measure. The

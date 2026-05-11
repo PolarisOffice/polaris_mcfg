@@ -81,22 +81,43 @@ EULA가 file parsing("metric extraction" / "reverse engineering")을 명시
 출력" 이 아닌 "폰트 작가의 내부 결정" 영역이다. 이걸 추출하는 행위는
 명백히 영역 B (reverse engineering).
 
-### 1.4 우리 도구의 모드별 매핑
+### 1.4 두 가지 운영 모드 — Strict 와 Full
 
-페어 list 읽기와 HB shape 는 **완전히 별개의 행위**임을 명확히:
+영역 A 안에서 휴리스틱 단독은 CJK 폰트에서 ~5% kerning 만 복원하므로 (§1.4.2 실측), **운영상 의미 있는 모드는 두 개뿐**:
 
-| 모드 | Pair 후보 출처 | Pair 값 측정 방법 | 영역 | 복원율 |
-|---|---|---|---|---:|
-| `--pixel-only` (FreeType) | (안 함) | (불가 — HB shape 비활성, FreeType 가 GPOS 안 봄) | A 만 | ~80% |
-| 기본 (`--include-kerning`) | **하드코딩 휴리스틱** (`kerning.py` 의 `ASCII_PRINTABLE` × `KOREAN_PUNCT`) | HB shape | A 만 | ~90% (Latin 위주) |
-| `--pair-list-from FILE` | **폰트 file 의 `kern` + `GPOS PairPos` internal lookup** | HB shape | A + B | ~100% |
-| `--unnamed-from FILE` / `--metadata-from FILE` | (n/a) | n/a | B | unnamed + metadata 추가 |
-| `--backend file` | 전체 file parsing | 전체 file parsing | B | 100% |
+```bash
+# Strict — 영역 A 만, EULA-strictest
+mcfg extract source.ttf --backend render --pixel-only --include-lsb \
+     -o spec.json
+
+# Full — 영역 A + B, 100% 복원
+mcfg extract source.ttf --backend render --full-reference source.ttf \
+     -o spec.json
+```
+
+`--full-reference FILE` 는 다음을 한 번에 활성화:
+- `--metadata-from FILE` (head/hhea/OS-2/post 분류 플래그)
+- `--pair-list-from FILE` (폰트의 internal pair list)
+- `--unnamed-from FILE` (cmap 외 글리프 metric)
+- `--include-lsb` / `--include-kerning` / `--include-shaped` (자동 켜짐)
+
+| 모드 | Pair 후보 출처 | Pair 값 측정 방법 | 영역 | CJK kerning | Latin kerning |
+|---|---|---|---|---:|---:|
+| `--pixel-only` | (시도 안 함) | (불가) | A 만 | 0% | 0% |
+| **`--full-reference FILE`** | **file 의 internal lookup** | HB shape | A + B | **~100%** | **~100%** |
+| (수동 조합) `--include-kerning` 만 | 하드코딩 휴리스틱 | HB shape | A 만 | ~5% | 70-95% |
+| (수동 조합) `--include-kerning --pair-list-from` | file | HB shape | A + B | ~100% | ~100% |
+| `--backend file` | 전체 file parsing | 전체 file parsing | B | 100% | 100% |
+
+> **왜 휴리스틱 단독 (`--include-kerning` 만) 은 권장하지 않는가**:
+> - NotoSansKR 21K 페어 중 ASCII × ASCII 영역이 1K (5%). 나머지 19.9K (한자-한자 클래스, Cyrillic 등) 누락.
+> - 외부 페어 list 를 받아도 — 그 list 도 결국 누군가의 file 분석 결과. 실질적으로 영역 B 정보.
+> - 그래서 의미 있는 선택은 "kerning 포기 (Strict)" 또는 "영역 B 포함 (Full)" 둘 뿐.
 
 > **결정적 통찰**:
-> - "페어 list 를 폰트에서 읽음" = `--pair-list-from` 일 때만 (영역 B)
-> - "HB shape 호출" = 기본 모드의 kerning 측정 메커니즘 (영역 A)
-> - 두 행위는 독립적. 기본 모드는 페어 list 읽지 않으면서도 HB shape 로 휴리스틱 후보의 값을 측정.
+> - "페어 list 를 폰트에서 읽음" = `--pair-list-from` (또는 `--full-reference`) 일 때만 (영역 B)
+> - "HB shape 호출" = 영역 A 의 kerning 측정 메커니즘 (Strict 가 아닐 때)
+> - 두 행위는 독립적이지만 CJK 폰트에서 영역 A 단독 의미 없음.
 
 ### 1.4.1 기본 모드의 정확한 동작
 
