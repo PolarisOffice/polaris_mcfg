@@ -457,11 +457,20 @@ def extract_via_render(
                     hangul_monospace_used = True
                     hangul_common_advance = common_units
                 # Replicate advance, single-render LSB per glyph.
+                # Wrap probe_lsb_only in try/except — complex CJK
+                # ideographs occasionally trip FreeType's raster
+                # overflow at size_px=1000. A skipped LSB falls back
+                # to None (downstream picks up the design font's value);
+                # advance is unaffected because it came from the block
+                # probe.
                 for i, cp in enumerate(block_cps):
                     lsb_units: int | None = None
                     if include_lsb:
-                        lsb_px = probe_lsb_only(
-                            backend, chr(cp), size_px=size_px)
+                        try:
+                            lsb_px = probe_lsb_only(
+                                backend, chr(cp), size_px=size_px)
+                        except Exception:
+                            lsb_px = None
                         if lsb_px is not None:
                             lsb_units = pixel_to_unit(
                                 lsb_px, size_px=size_px, upem=upem_used)
