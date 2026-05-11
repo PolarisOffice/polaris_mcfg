@@ -15,54 +15,113 @@ EULA가 file parsing("metric extraction" / "reverse engineering")을 명시
 
 ## 1. 라이센스 안전 경계
 
-폰트 EULA 가 허용하는 범위가 다양하므로 본 도구는 layer 별로 모드를 선택할
-수 있도록 설계되었다.
+### 1.1 두 영역의 결정적 차이
 
-### 1.1 레이어별 EULA 위치
+폰트에 대한 행위는 **정상 rendering 의 출력 사용** vs **internal table 의
+직접 분석** 두 영역으로 정확히 나뉜다. 이 분리가 EULA 해석의 핵심이다.
 
 ```
-강한 reverse engineering  ↑                                  ↓ 일반 사용
-   file 직접 파싱        HB shape       Pixel 측정       사람 손 + 자
-  (fontTools)           (HarfBuzz)     (FreeType)
-       ↓                    ↓              ↓
-   table 데이터          internal       render output     자로 측정
-   직접 추출             access only    만 측정
+영역 A — 정상 rendering 의 출력 사용                 영역 B — internal table 의 직접 분석
+─────────────────────────────────────                ─────────────────────────────────────
+
+  Pixel 측정              HB shape                    file backend         pair-list / unnamed / metadata
+  (FreeType /            (HarfBuzz                     (fontTools)         (fontTools 부분 사용)
+   Chromium 결과)          numeric)                         │                       │
+       │                       │                            ▼                       ▼
+       ▼                       ▼                       table 전체 분석          internal lookup
+   화면에 보이는           shaper 가 사용자             모든 메트릭값            데이터 enumerate
+   결과 측정              에게 주는 결과                직접 추출               (rendering 시
+       │                       │                           │                  노출 안 됨)
+       └─────── 등가 정보 ─────┘
+                                                            └──────── 둘 다 reverse engineering ────┘
+       (시각적 텍스트의                                       (rendering 결과가 아닌
+        positioning 정보)                                      internal data 직접 access)
 ```
 
-| Layer | "정상 사용" 정의 부합 | 주요 한계 |
+| 영역 | 행위 | EULA 위치 |
 |---|---|---|
-| **Pure pixel rendering + measurement** | ✅ "화면 자로 측정" 과 동등. 모든 EULA 안전 | advance/LSB/vertical 만 (no kerning, no shaped advance) |
-| **+ HarfBuzz shape** | ⚠️ HB 는 OS/브라우저 표준 텍스트 엔진. 결과 numeric 만 사용 | HB 가 내부적으로 file 파싱. "내부 reverse engineering" 논쟁 여지 |
-| **+ file pair list (numeric)** | ❌ fontTools 로 직접 파싱. 단, metric *값* 이 아니라 *list* (pair tuple) 만 | 메트릭 list 도 추출로 해석 가능 |
-| **+ file metadata flags** | ❌ 직접 파싱. 단, 분류 라벨만 (italicAngle, fsSelection 등) | 분류 정보 추출도 위반 가능 |
-| **+ file unnamed glyph numeric** | ❌ 명백한 file parsing. metric 값 직접 read | 가장 위 layer |
+| **A** | Pixel 측정 (FreeType/Chromium 렌더 결과 자로 측정) | "사용자가 화면 자로 측정" 과 동등. EULA 안전 |
+| **A** | HarfBuzz shape() 결과 (positioning numeric) | **Chrome, Firefox, Safari, Android, iOS, Office 가 매일 호출**. 정상 rendering 의 일부 |
+| **B** | `--pair-list-from FILE` 페어 tuple list | 폰트의 `kern` + `GPOS PairPos` internal lookup 추출. **rendering 시 노출되지 않음** — reverse engineering |
+| **B** | `--metadata-from FILE` 분류 플래그 | `head/hhea/OS-2/post` enum 직접 read. 분류 정보의 직접 추출 |
+| **B** | `--unnamed-from FILE` cmap 외 글리프 메트릭 | `hmtx` 의 unnamed 행 직접 read. 가장 명백한 metric 추출 |
+| **B** | `--backend file` 전체 table parsing | 모든 영역 B 행위의 합 |
 
-### 1.2 우리 도구의 모드별 매핑
+### 1.2 영역 A 가 안전한 이유
 
-| 모드 | 활성 layer | EULA 강도 | 복원율 |
+영역 A 의 두 layer (픽셀, HB shape) 는 **시각적 텍스트의 등가 정보**:
+
+- "AV" 라는 페어를 영역 A 의 두 방법으로 측정하면:
+  - **픽셀**: 브라우저 렌더 결과에서 V 의 시작 좌표 = 50px 위치
+  - **HB shape**: `positions[0].x_advance + positions[1].x_offset` = 50u
+  - → 둘 다 "kerning 적용된 후의 positioning" 정보
+  - → 시각적으로 본 결과를 numeric 으로 받느냐 픽셀로 보느냐 차이
+
+영역 A 는 모든 OS/브라우저가 매일 호출하는 표준 rendering. EULA 가 영역 A
+를 금지하면 폰트 자체를 사용 불가능.
+
+### 1.3 영역 B 가 reverse engineering 인 이유
+
+폰트 작가가 `GPOS PairPos lookup` 에 `(A, V) → -50u, (T, o) → -80u, ...`
+같은 페어 list 를 정의했을 때, 일반 사용자가 폰트를 사용하는 동안 그
+**list 자체** 는 절대 노출되지 않는다:
+
+- HB 가 lookup 으로 사용해 결과 positioning 만 출력
+- 픽셀에 적용된 효과 만 표시
+- 사용자는 어떤 페어가 정의되어 있는지 모름
+
+**페어 list 를 얻는 방법**:
+
+| 방법 | 비용 | 평가 |
+|---|---|---|
+| `fontTools` 로 GPOS table 직접 파싱 | ~10ms | 명백한 reverse engineering |
+| Brute-force: cmap × cmap 모든 페어 HB shape, 0 아닌 것만 keep | N² × ~1ms ≈ ~수개월 (24K 글리프 폰트) | 시간상 비현실적 |
+
+페어 list 는 폰트의 **internal lookup 데이터**로, "표준 rendering 의
+출력" 이 아닌 "폰트 작가의 내부 결정" 영역이다. 이걸 추출하는 행위는
+명백히 영역 B (reverse engineering).
+
+### 1.4 우리 도구의 모드별 매핑
+
+| 모드 | 사용 영역 | EULA 위치 | 복원율 |
 |---|---|---|---:|
-| `--pixel-only` | Pixel 만 | **모든 EULA 안전** | ~80% |
-| (기본) | + HB shape | 중간 | ~90% |
-| `--full-reference FILE` | + file numeric copy | 약-중 | ~100% |
-| `--backend file` | 전체 file parsing | 가장 약 | 100% |
+| `--pixel-only` (FreeType) | 영역 A의 픽셀만 | EULA 안전. FreeType 단독은 GPOS 안 보므로 kerning 손실 | ~80% |
+| (기본, `--include-kerning` 등) | 영역 A 의 픽셀 + HB shape | EULA 안전 — 정상 rendering 의 일부 | ~90% |
+| `--pair-list-from FILE` / `--unnamed-from` / `--metadata-from` | 영역 A + B의 일부 | EULA 위험 — internal table 추출. 엄격한 EULA 시 위반 | ~100% |
+| `--backend file` | 전체 영역 B | EULA 가장 약 | 100% |
 
-### 1.3 행위별 매트릭스
+### 1.5 행위별 매트릭스
 
-| 행위 | file 백엔드 | render 기본 | render `--pixel-only` |
+| 행위 | file backend | render 기본 | render `--pixel-only` |
 |---|:---:|:---:|:---:|
-| 폰트 테이블 직접 파싱 (fontTools) | ✅ | ❌ (cmap 만) | ❌ (cmap 만) |
-| 글리프 outline 좌표 추출 | ❌ | ❌ | ❌ |
-| 폰트 렌더링 결과 (픽셀) 측정 | n/a | ✅ | ✅ |
-| HarfBuzz shape() 호출 (kerning, shaped 추출) | n/a | ✅ | ❌ |
-| File numeric copy (pair list, metadata, unnamed) | n/a | opt-in | ❌ |
-| OS 텍스트 API (`CTRunGetAdvances` 등) 호출 | n/a | (browser 백엔드만) | ✅ |
-| `@font-face` 로 브라우저에서 텍스트 렌더 | n/a | (browser 백엔드만) | ✅ |
+| 폰트 테이블 직접 파싱 (fontTools) | ✅ 전체 | ❌ (cmap-table read 만) | ❌ (cmap-table read 만) |
+| 글리프 outline 좌표 추출 | ❌ never | ❌ never | ❌ never |
+| 픽셀 측정 (영역 A) | n/a | ✅ | ✅ |
+| HarfBuzz shape() (영역 A) | n/a | ✅ | ❌ |
+| **페어 list 추출 (영역 B)** | ✅ | opt-in (`--pair-list-from`) | ❌ |
+| **메타데이터 flag 추출 (영역 B)** | ✅ | opt-in (`--metadata-from`) | ❌ |
+| **Unnamed glyph metric 추출 (영역 B)** | ✅ | opt-in (`--unnamed-from`) | ❌ |
+| OS 텍스트 API 호출 | n/a | (browser 백엔드만) | ✅ |
+| `@font-face` 로 브라우저 적재 | n/a | (browser 백엔드만) | ✅ |
 
-### 1.4 권장 선택 가이드
+> **참고 — cmap-table read**: `_enumerate_cmap_from_font()` 는 cmap table
+> 만 fontTools 로 읽어 "어떤 codepoint 가 폰트에 있는가" 를 알아낸다.
+> cmap 은 "지원 목록" 으로, 메트릭 정보가 아니며 일반적으로 EULA 가 이걸
+> 금지하지 않는다 (예: 도서관 분류번호와 책 내용의 관계). 그래도
+> 회피하려면 사용자가 `--cmap` 으로 codepoint 직접 명시 (현재 API 지원).
 
-- **OFL / 일반 상용 폰트** (대부분): 기본 모드. HB shape 까지 사용 OK.
-- **EULA 가 "metric extraction" 명시 금지 폰트** (일부 한컴 폰트, 일부 사내 폰트): `--pixel-only` 사용. kerning 손실 있지만 EULA 안전.
-- **EULA 가 모든 reverse engineering 금지 폰트**: 진정한 EULA-safe 는 사실 폰트를 자로 측정하는 것뿐. `--pixel-only` 가 가장 가깝지만 fontTools cmap-read 도 회피하려면 사용자가 `--cmap` 직접 명시 필요 (TODO).
+### 1.6 권장 선택 가이드
+
+- **OFL / 일반 상용 폰트** (대부분): 기본 모드 (HB shape 까지). 또는
+  `--backend file` 으로 빠르게 (수십 ms).
+- **EULA 가 "metric extraction" / "reverse engineering" 명시 금지 폰트**
+  (일부 한컴 폰트, 사내 전용 폰트): `--pixel-only` 또는 기본 (HB shape
+  까지). **영역 B 옵션 (`--pair-list-from`, `--unnamed-from`,
+  `--metadata-from`, `--backend file`) 은 사용 금지**.
+- **EULA 가 모든 reverse engineering 을 절대 금지**: 더 엄격하게는
+  사용자가 `--cmap` 으로 codepoint list 까지 직접 명시 → fontTools 호출
+  완전 회피. 이 모드에서는 모든 정보가 영역 A (pixel + HB shape) 만에서
+  나오므로 EULA-perfect.
 
 ## 2. 아키텍처
 

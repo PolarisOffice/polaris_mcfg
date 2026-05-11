@@ -72,21 +72,40 @@ mcfg --help
 
 자세한 내용: [docs/design/12-render-extractor.md](docs/design/12-render-extractor.md).
 
-### EULA 강도별 4가지 모드 (`--backend render`)
+### EULA 두 영역 — "정상 rendering" vs "internal table 분석"
 
-폰트 EULA 가 어디까지 허용하느냐에 따라 layer 를 선택합니다. **HarfBuzz shape 와 file numeric copy 는 엄격한 EULA 해석에서는 reverse engineering 으로 분류될 수 있다**는 점을 정직하게 고지합니다:
+폰트 데이터에 대한 행위는 두 영역으로 정확히 나뉩니다:
 
-| 모드 | 사용 layer | EULA 위치 | 메트릭 복원율 |
+**영역 A — 정상 rendering 의 출력 사용** (모든 OS/브라우저가 매일 함):
+- 픽셀 측정 (FreeType / Chromium 렌더 결과)
+- HarfBuzz shape() 결과 (positioning numeric)
+- → **두 결과는 등가 정보**. 시각적 텍스트에 이미 적용된 효과를 numeric 으로 받느냐 픽셀로 보느냐의 차이뿐.
+- → EULA 위반으로 해석하면 폰트 자체 사용 불가능
+
+**영역 B — Rendering 시 노출되지 않는 internal data 의 직접 분석**:
+- 페어 list (`kern` table 또는 `GPOS` PairPos lookup 안의 페어 tuple list)
+- 분류 메타데이터 (`head`/`hhea`/`OS/2`/`post` 의 enum/flag field)
+- Unnamed glyph metric (cmap 외 글리프의 `hmtx` 값)
+- → 정상 rendering 의 출력에 노출되지 않는 폰트 internal lookup 데이터
+- → reverse engineering 으로 분류됨
+
+### 4가지 모드 매트릭스
+
+| 모드 | 사용하는 영역 | EULA 위치 | 메트릭 복원율 |
 |---|---|---|---:|
-| `--pixel-only` | 순수 픽셀 측정만 | "디자이너가 화면 보고 자로 잰다" 와 동등. **모든 EULA 안전** | ~80% (advance + LSB + vertical + italic + underline) |
-| (기본) | + HarfBuzz shape | HB 는 텍스트 엔진 (브라우저/OS 가 매일 사용). "정상 사용" 으로 일반 인정 | ~90% (+ kerning + shaped advance) |
-| `--full-reference FILE` | + file numeric copy (pair list, metadata, unnamed glyph) | fontTools 로 file table read. **numeric only** (outline 안 봄). 엄격한 EULA 해석 시 reverse engineering 으로 분류 가능 | ~100% |
-| `--backend file` | 전체 file parsing | 강한 reverse engineering. EULA 가 명시 금지 시 위반 | 100% (정수 정확) |
+| `--pixel-only` (FreeType) | 픽셀 측정만 | **영역 A**. 다만 FreeType 단독은 GPOS 적용 안 함 → kerning 손실 | ~80% |
+| (기본, `--include-kerning` 등) | 픽셀 + HarfBuzz shape | **영역 A**. HB shape 는 정상 rendering 의 일부 — Chrome, Firefox, OS 가 매일 호출 | ~90% |
+| `--pair-list-from` / `--unnamed-from` / `--metadata-from` | + file internal table 분석 | **영역 B** — reverse engineering 영역. EULA 가 명시 금지 시 위반 | ~100% |
+| `--backend file` | 전체 file parsing | 영역 B 의 가장 강한 형태 | 100% (정수 정확) |
+
+> **핵심 정정**: HB shape 자체는 정상 rendering 의 일부로 EULA 안전 영역에 있습니다. 결정적 EULA 위험은 `--pair-list-from` / `--unnamed-from` / `--metadata-from` / `--backend file` 처럼 **rendering 출력 외의 internal table 데이터를 직접 추출하는 행위**입니다.
 
 **권장 사용**:
-- **OFL / 일반 상용 폰트**: 기본 모드 (HB shape 까지 OK)
-- **EULA가 "metric extraction" 명시 금지 폰트** (일부 한컴 폰트 등): `--pixel-only`
-- **공개 폰트로 빠른 작업**: `--backend file` (수십 ms)
+
+| 폰트 카테고리 | 모드 |
+|---|---|
+| OFL / 일반 상용 폰트 | 기본 (HB shape 까지 OK), 또는 `--backend file` 으로 빠르게 |
+| EULA가 "metric extraction" 또는 "reverse engineering" 명시 금지 폰트 (일부 한컴/사내 폰트) | `--pixel-only` 또는 기본 (HB shape 까지). 영역 B 옵션은 사용 금지 |
 
 자세한 layer 별 EULA 분석: [docs/design/12-render-extractor.md §1](docs/design/12-render-extractor.md#1-라이센스-안전-경계).
 
