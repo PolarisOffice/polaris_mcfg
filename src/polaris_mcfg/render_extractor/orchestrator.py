@@ -111,6 +111,19 @@ def probe_advance_and_lsb(backend: RenderBackend, ch: str, size_px: int = 1000,
     return advance, lsb
 
 
+def probe_lsb_only(backend: RenderBackend, ch: str,
+                   size_px: int = 1000) -> float | None:
+    """LSB-only single-render probe. ~4× cheaper than probe_advance_and_lsb
+    when advance is already known (e.g. inside the Hangul fast-path)."""
+    result = backend.render(RenderRequest(text=ch, size_px=size_px))
+    if not result.glyphs:
+        return None
+    bbox = measure_glyph_bbox(result.image, result.glyphs[0])
+    if bbox.is_empty:
+        return None
+    return bbox.ink_left - bbox.pen_x
+
+
 def probe_vertical(backend: RenderBackend, size_px: int = 1000,
                    refs: dict[str, str] = DEFAULT_VERT_REFS) -> dict[str, float]:
     """Render the vertical reference string and return pixel-space metrics.
@@ -215,6 +228,21 @@ def _enumerate_cmap_from_font(font_path: Path) -> list[int]:
         font.close()
 
 
+def _partition_hangul_syllables(cmap: list[int]) -> tuple[list[int], list[int]]:
+    """Split a cmap into ``(hangul_syllables, other)``.
+
+    Hangul Syllables block = U+AC00 .. U+D7A3 (11,172 chars).
+    """
+    hangul: list[int] = []
+    other: list[int] = []
+    for cp in cmap:
+        if 0xAC00 <= cp <= 0xD7A3:
+            hangul.append(cp)
+        else:
+            other.append(cp)
+    return hangul, other
+
+
 def extract_via_render(
     font_path: str | Path,
     *,
@@ -273,7 +301,48 @@ def extract_via_render(
         global_dicts = _measure_global(backend, size_px=size_px, upem=upem_used)
 
         glyphs: dict[str, GlyphMetric] = {}
-        for i, cp in enumerate(cmap):
+        hangul_monospace_used = False
+        hangul_common_advance: int | None = None
+
+        # Hangul fast-path: if the Syllables block is monospace, measure
+        # one syllable and replicate to the other 11,171.
+        if detect_monospace:
+            hangul_cps, other_cps = _partition_hangul_syllables(cmap)
+            if len(hangul_cps) >= len(HANGUL_MONOSPACE_PROBES):
+                is_mono, common_px = _hangul_is_monospace(
+                    backend, size_px=size_px)
+                if is_mono and common_px is not None:
+                    hangul_monospace_used = True
+                    hangul_common_advance = pixel_to_unit(
+                        common_px, size_px=size_px, upem=upem_used)
+                    # Replicate ADVANCE across the block. LSB is per-syllable
+                    # even when advance is uniform (Korean syllables share
+                    # the same advance box but the ink position inside it
+                    # varies), so we still single-render each syllable for
+                    # LSB if include_lsb=True. Even so, the per-syllable LSB
+                    # probe is ~4× cheaper than the 4-repeat advance probe,
+                    # so the fast-path still pays off.
+                    for cp in hangul_cps:
+                        lsb_units: int | None = None
+                        if include_lsb:
+                            lsb_px = probe_lsb_only(
+                                backend, chr(cp), size_px=size_px)
+                            if lsb_px is not None:
+                                lsb_units = pixel_to_unit(
+                                    lsb_px, size_px=size_px, upem=upem_used)
+                        glyphs[codepoint_to_id(cp)] = GlyphMetric(
+                            advanceWidth=hangul_common_advance,
+                            lsb=lsb_units,
+                        )
+                    cmap_to_measure = other_cps
+                else:
+                    cmap_to_measure = cmap
+            else:
+                cmap_to_measure = cmap
+        else:
+            cmap_to_measure = cmap
+
+        for i, cp in enumerate(cmap_to_measure):
             ch = chr(cp)
             try:
                 if include_lsb:
@@ -290,7 +359,7 @@ def extract_via_render(
             glyphs[codepoint_to_id(cp)] = GlyphMetric(
                 advanceWidth=adv_units, lsb=lsb_units)
             if progress and (i + 1) % 500 == 0:
-                print(f"  ... {i + 1}/{len(cmap)} glyphs measured")
+                print(f"  ... {i + 1}/{len(cmap_to_measure)} glyphs measured")
 
     global_metrics = GlobalMetrics(
         unitsPerEm=upem_used,
@@ -299,14 +368,22 @@ def extract_via_render(
         os2=global_dicts["os2"],
         post=global_dicts["post"],
     )
+    source: dict = {
+        "filename": font_path.name,
+        "extractedVia": "render",
+        "renderer": renderer,
+        "renderSizePx": size_px,
+        "reportedUpem": reported_upem,
+    }
+    if hangul_monospace_used:
+        source["hangulMonospace"] = {
+            "detected": True,
+            "commonAdvance": hangul_common_advance,
+            "syllablesReplicated": sum(
+                1 for cp in cmap if 0xAC00 <= cp <= 0xD7A3),
+        }
     spec = MetricsSpec(
-        source={
-            "filename": font_path.name,
-            "extractedVia": "render",
-            "renderer": renderer,
-            "renderSizePx": size_px,
-            "reportedUpem": reported_upem,
-        },
+        source=source,
         global_metrics=global_metrics,
         glyphs=glyphs,
     )
